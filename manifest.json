@@ -4,10 +4,10 @@
   "manifest_version": 1,
   "description": "A Lancer utility extension for Owlbear Rodeo.",
   "author": "GravityHorse",
-  "icon": "/lancer-uplink/icon.svg",
+  "icon": "/lancer-uplink/icons/tool.svg",
   "action": {
     "title": "Lancer Uplink",
-    "icon": "/lancer-uplink/icon.svg",
+    "icon": "/lancer-uplink/icons/tool.svg",
     "popover": "/lancer-uplink/index.html",
     "height": 600,
     "width": 400
