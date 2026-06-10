@@ -8,7 +8,7 @@
   "action": {
     "title": "Lancer Uplink",
     "icon": "/lancer-uplink/icon.svg",
-    "popover": "/lancer-uplink/",
+    "popover": "/lancer-uplink/index.html",
     "height": 600,
     "width": 400
   }
