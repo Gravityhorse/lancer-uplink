@@ -29,13 +29,14 @@
         box-sizing: border-box;
       }
 
-      button {
-        margin-top: 12px;
-        width: 100%;
-        padding: 8px;
+      #status {
+        margin-top: 14px;
+        font-size: 13px;
+        color: #cccccc;
       }
     </style>
   </head>
+
   <body>
     <h1>Lancer Uplink</h1>
 
@@ -49,7 +50,7 @@
       <input id="color" type="color" value="#d22f3d" />
     </label>
 
-    <p>Use the LANCER Templates tool from the Owlbear toolbar.</p>
+    <p id="status">Loading extension...</p>
 
     <script type="module" src="./main.js"></script>
   </body>
