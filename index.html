@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Lancer Uplink</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 12px;
+        font-family: Arial, sans-serif;
+        background: #1f1f1f;
+        color: white;
+      }
+
+      h1 {
+        font-size: 18px;
+        margin: 0 0 12px;
+      }
+
+      label {
+        display: block;
+        margin-top: 12px;
+        font-size: 13px;
+      }
+
+      input {
+        width: 100%;
+        margin-top: 4px;
+        box-sizing: border-box;
+      }
+
+      button {
+        margin-top: 12px;
+        width: 100%;
+        padding: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Lancer Uplink</h1>
+
+    <label>
+      Template Size
+      <input id="size" type="number" min="1" max="20" value="3" />
+    </label>
+
+    <label>
+      Template Color
+      <input id="color" type="color" value="#d22f3d" />
+    </label>
+
+    <p>Use the LANCER Templates tool from the Owlbear toolbar.</p>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
