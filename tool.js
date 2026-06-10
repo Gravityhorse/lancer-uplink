@@ -1,6 +1,6 @@
 // tool.js — registers a LANCER Templates tool in Owlbear's toolbar.
 
-import { OBR, ID, META } from "./sdk.js";
+import { OBR, ID, META } from "./sdk.js?v=10";
 import {
   pixelToHex,
   hexesInRange,
@@ -9,7 +9,7 @@ import {
   snapAngle,
   keyToHex,
   hexToPixel,
-} from "./hex.js";
+} from "./hex.js?v=10";
 import {
   buildHexOverlay,
   addSharedTemplate,
@@ -17,7 +17,7 @@ import {
   toggleTerrainHex,
   removeTerrainHex,
   renderTerrain,
-} from "./overlay.js";
+} from "./overlay.js?v=10";
 
 const TOOL = `${ID}/tool`;
 
