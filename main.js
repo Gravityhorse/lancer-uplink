@@ -1,19 +1,19 @@
 const status = document.getElementById("status");
 
 if (status) {
-  status.textContent = "main.js is running.";
+  status.textContent = "main.js v10 is running.";
 }
 
-console.log("[LANCER//UPLINK] main.js loaded successfully.");
+console.log("[LANCER//UPLINK] main.js v10 loaded successfully.");
 
 try {
-  const sdk = await import("./sdk.js");
+  const sdk = await import("./sdk.js?v=10");
   console.log("[LANCER//UPLINK] sdk.js imported.", sdk);
 
-  const hex = await import("./hex.js");
+  const hex = await import("./hex.js?v=10");
   console.log("[LANCER//UPLINK] hex.js imported.", hex);
 
-  const tool = await import("./tool.js");
+  const tool = await import("./tool.js?v=10");
   console.log("[LANCER//UPLINK] tool.js imported.", tool);
 
   if (status) {
@@ -36,6 +36,7 @@ try {
 
       if (sizeInput) {
         tool.templateConfig.size = Number(sizeInput.value) || 3;
+
         sizeInput.addEventListener("change", () => {
           tool.templateConfig.size = Number(sizeInput.value) || 3;
         });
@@ -43,6 +44,7 @@ try {
 
       if (colorInput) {
         tool.templateConfig.color = colorInput.value;
+
         colorInput.addEventListener("change", () => {
           tool.templateConfig.color = colorInput.value;
         });
