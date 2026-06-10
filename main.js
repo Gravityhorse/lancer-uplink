@@ -1,53 +1,75 @@
-import { OBR } from "./sdk.js";
-import { calibrate } from "./hex.js";
-import { registerTool, templateConfig } from "./tool.js";
+const status = document.getElementById("status");
 
-async function startLancerUplink() {
-  const status = document.getElementById("status");
-
-  try {
-    if (status) status.textContent = "Calibrating Owlbear grid...";
-
-    await calibrate();
-
-    if (status) status.textContent = "Registering LANCER template tool...";
-
-    await registerTool();
-
-    const sizeInput = document.getElementById("size");
-    const colorInput = document.getElementById("color");
-
-    if (sizeInput) {
-      templateConfig.size = Number(sizeInput.value) || 3;
-
-      sizeInput.addEventListener("change", () => {
-        templateConfig.size = Number(sizeInput.value) || 3;
-      });
-    }
-
-    if (colorInput) {
-      templateConfig.color = colorInput.value;
-
-      colorInput.addEventListener("change", () => {
-        templateConfig.color = colorInput.value;
-      });
-    }
-
-    if (status) {
-      status.textContent =
-        "Loaded. Select the LANCER Templates tool from Owlbear's left toolbar.";
-    }
-  } catch (error) {
-    console.error("[LANCER//UPLINK] Failed to initialize", error);
-
-    if (status) {
-      status.textContent = `Failed to load: ${error?.message || String(error)}`;
-    }
-  }
+if (status) {
+  status.textContent = "main.js is running.";
 }
 
-if (OBR.isReady) {
-  startLancerUplink();
-} else {
-  OBR.onReady(startLancerUplink);
+console.log("[LANCER//UPLINK] main.js loaded successfully.");
+
+try {
+  const sdk = await import("./sdk.js");
+  console.log("[LANCER//UPLINK] sdk.js imported.", sdk);
+
+  const hex = await import("./hex.js");
+  console.log("[LANCER//UPLINK] hex.js imported.", hex);
+
+  const tool = await import("./tool.js");
+  console.log("[LANCER//UPLINK] tool.js imported.", tool);
+
+  if (status) {
+    status.textContent = "Files loaded. Waiting for Owlbear...";
+  }
+
+  const { OBR } = sdk;
+
+  async function start() {
+    try {
+      if (status) {
+        status.textContent = "Owlbear is ready. Registering tool...";
+      }
+
+      await hex.calibrate();
+      await tool.registerTool();
+
+      const sizeInput = document.getElementById("size");
+      const colorInput = document.getElementById("color");
+
+      if (sizeInput) {
+        tool.templateConfig.size = Number(sizeInput.value) || 3;
+        sizeInput.addEventListener("change", () => {
+          tool.templateConfig.size = Number(sizeInput.value) || 3;
+        });
+      }
+
+      if (colorInput) {
+        tool.templateConfig.color = colorInput.value;
+        colorInput.addEventListener("change", () => {
+          tool.templateConfig.color = colorInput.value;
+        });
+      }
+
+      if (status) {
+        status.textContent =
+          "Loaded. Use the LANCER Templates tool from Owlbear's left toolbar.";
+      }
+    } catch (error) {
+      console.error("[LANCER//UPLINK] Tool registration failed:", error);
+
+      if (status) {
+        status.textContent = `Tool failed: ${error.message || String(error)}`;
+      }
+    }
+  }
+
+  if (OBR.isReady) {
+    start();
+  } else {
+    OBR.onReady(start);
+  }
+} catch (error) {
+  console.error("[LANCER//UPLINK] Import failed:", error);
+
+  if (status) {
+    status.textContent = `Import failed: ${error.message || String(error)}`;
+  }
 }
