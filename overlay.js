@@ -1,80 +1,140 @@
-// dice.js — Lancer's dice, done correctly.
-//
-// ACCURACY / DIFFICULTY (not D&D advantage):
-//   Accuracy and Difficulty cancel 1:1. For the net remainder you roll that
-//   many d6 and apply ONLY THE SINGLE HIGHEST, +highest for net Accuracy,
-//   -highest for net Difficulty. They never stack by summing.
-//
-// OVERKILL:
-//   RAW   — any damage die showing 1 is rerolled until it isn't a 1;
-//           the attacker takes +1 Heat per reroll.
-//   HOUSE — (this table's rule) a 1 stays on the board and spawns an extra
-//           die; new dice can themselves explode, theoretically forever.
-//           +1 Heat per 1 rolled, same as RAW.
+// overlay.js — builds and manages shared LANCER template and terrain overlays.
 
-const d = (faces) => 1 + Math.floor(Math.random() * faces);
+import { OBR, buildPath, ID, META } from "./sdk.js";
+import { hexCorners, hexKey } from "./hex.js";
 
-export function rollAttack({ netAccuracy = 0, flat = 0 }) {
-  const d20 = d(20);
-  const n = Math.abs(netAccuracy);
-  const accDice = Array.from({ length: n }, () => d(6));
-  const highest = n ? Math.max(...accDice) : 0;
-  const accApplied = netAccuracy > 0 ? highest : netAccuracy < 0 ? -highest : 0;
-  return {
-    d20,
-    flat,
-    accDice,
-    accApplied,
-    netAccuracy,
-    total: d20 + flat + accApplied,
-    crit: d20 === 20,
-    isCritRange: d20 + flat + accApplied >= 20 && d20 !== 1, // Lancer: total ≥ 20 crits
-  };
-}
+const TERRAIN_KEY = `${ID}/terrain`;
+const TERRAIN_ITEM_ID = `${ID}/terrain-overlay`;
 
-// dice: [{ n, faces }], e.g. [{n:2,faces:6},{n:1,faces:3}]
-export function rollDamage({ dice = [], flat = 0, overkill = false, mode = "house", safety = 200 }) {
-  const groups = [];
-  let heat = 0;
-  let guard = 0;
+function hexToPathCommands(hexes) {
+  const commands = [];
 
-  for (const g of dice) {
-    const faces = g.faces;
-    const rolls = []; // { v, exploded?:bool, spawn?:bool, rerolls?:number }
-    const queue = Array.from({ length: g.n }, () => ({ spawn: false }));
-    while (queue.length && guard < safety) {
-      guard++;
-      const meta = queue.shift();
-      let v = d(faces);
-      if (!overkill) { rolls.push({ v }); continue; }
+  for (const h of hexes) {
+    const corners = hexCorners(h);
 
-      if (mode === "raw") {
-        // Reroll 1s until they aren't; each reroll = +1 Heat.
-        let chain = 0;
-        while (v === 1 && guard < safety) { guard++; heat++; chain++; v = d(faces); }
-        rolls.push({ v, rerolls: chain });
-      } else {
-        // HOUSE: the 1 stays on the board and spawns another die of this type.
-        const entry = { v, spawn: meta.spawn };
-        if (v === 1) { heat++; entry.exploded = true; queue.push({ spawn: true }); }
-        rolls.push(entry);
-      }
+    if (!corners.length) continue;
+
+    commands.push([0, corners[0].x, corners[0].y]);
+
+    for (let i = 1; i < corners.length; i++) {
+      commands.push([1, corners[i].x, corners[i].y]);
     }
-    groups.push({ faces, rolls });
+
+    commands.push([2]);
   }
 
-  const total =
-    groups.reduce((s, g) => s + g.rolls.reduce((a, r) => a + r.v, 0), 0) + flat;
-  const truncated = guard >= safety;
-  return { groups, flat, total, heat, overkill, mode, truncated };
+  return commands;
 }
 
-export function formatAttack(res) {
-  const parts = [`d20→${res.d20}`];
-  if (res.netAccuracy !== 0) {
-    const sign = res.netAccuracy > 0 ? "ACC" : "DIFF";
-    parts.push(`${sign}[${res.accDice.join(",")}]→${res.accApplied >= 0 ? "+" : ""}${res.accApplied}`);
+export function buildHexOverlay(
+  hexes,
+  {
+    color = "#d22f3d",
+    fillOpacity = 0.22,
+    strokeOpacity = 0.85,
+    strokeWidth = 2,
+    name = "LANCER Template",
+    kind = "template",
+  } = {}
+) {
+  const commands = hexToPathCommands(hexes);
+
+  return buildPath()
+    .id(`${ID}/${kind}/${crypto.randomUUID()}`)
+    .name(name)
+    .layer("DRAWING")
+    .commands(commands)
+    .fillColor(color)
+    .fillOpacity(fillOpacity)
+    .strokeColor(color)
+    .strokeOpacity(strokeOpacity)
+    .strokeWidth(strokeWidth)
+    .metadata({
+      [META]: {
+        kind,
+        source: ID,
+      },
+    })
+    .build();
+}
+
+export async function addSharedTemplate(hexes, options = {}) {
+  const item = buildHexOverlay(hexes, {
+    ...options,
+    kind: "template",
+  });
+
+  await OBR.scene.items.addItems([item]);
+
+  return item;
+}
+
+export async function getTerrainSet() {
+  const metadata = await OBR.scene.getMetadata();
+  const values = metadata?.[TERRAIN_KEY];
+
+  if (Array.isArray(values)) {
+    return new Set(values);
   }
-  if (res.flat) parts.push(`${res.flat >= 0 ? "+" : ""}${res.flat}`);
-  return parts.join(" ");
+
+  return new Set();
+}
+
+async function saveTerrainSet(set) {
+  await OBR.scene.setMetadata({
+    [TERRAIN_KEY]: [...set],
+  });
+}
+
+export async function toggleTerrainHex(hex) {
+  const set = await getTerrainSet();
+  const key = hexKey(hex);
+
+  if (set.has(key)) {
+    set.delete(key);
+  } else {
+    set.add(key);
+  }
+
+  await saveTerrainSet(set);
+
+  return set;
+}
+
+export async function removeTerrainHex(hex) {
+  const set = await getTerrainSet();
+  const key = hexKey(hex);
+
+  set.delete(key);
+
+  await saveTerrainSet(set);
+
+  return set;
+}
+
+export async function renderTerrain(keys, keyToHex) {
+  try {
+    await OBR.scene.items.deleteItems([TERRAIN_ITEM_ID]);
+  } catch (_) {
+    // Ignore if the terrain overlay does not exist yet.
+  }
+
+  const hexes = keys.map(keyToHex);
+
+  if (!hexes.length) return null;
+
+  const item = buildHexOverlay(hexes, {
+    color: "#7a5cff",
+    fillOpacity: 0.2,
+    strokeOpacity: 0.75,
+    strokeWidth: 2,
+    name: "Difficult Terrain",
+    kind: "terrain",
+  });
+
+  item.id = TERRAIN_ITEM_ID;
+
+  await OBR.scene.items.addItems([item]);
+
+  return item;
 }
