@@ -1,12 +1,15 @@
-// sdk.js — single import point for the Owlbear Rodeo SDK.
-// Served via jsDelivr's ESM build so the extension needs no bundler.
-import OBR, { buildPath, buildShape, Command } from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk/+esm";
-
-export { OBR, buildPath, buildShape, Command };
-
-// Namespaced metadata / broadcast keys.
-export const ID = "tech.lancer-uplink";
-export const META = `${ID}/meta`;
-export const CH_ROLL = `${ID}/roll`;
-export const CH_CASCADE = `${ID}/cascade`;
-export const CH_STATUS = `${ID}/status`;
+{
+  "name": "Lancer Uplink",
+  "version": "1.0.0",
+  "manifest_version": 1,
+  "description": "A Lancer utility extension for Owlbear Rodeo.",
+  "author": "GravityHorse",
+  "icon": "/lancer-uplink/icon.svg",
+  "action": {
+    "title": "Lancer Uplink",
+    "icon": "/lancer-uplink/icon.svg",
+    "popover": "/lancer-uplink/",
+    "height": 600,
+    "width": 400
+  }
+}
