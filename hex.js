@@ -16,29 +16,51 @@ const SQRT3 = Math.sqrt(3);
 export const grid = {
   ready: false,
   pointy: true,           // hex: pointy-top vs flat-top
+  autoPointy: true,       // what calibration detected
   R: 75 / SQRT3,          // hex circumradius in px
   S: 150,                 // square cell size in px
   origin: { x: 0, y: 0 }, // a known cell center anchoring the lattice
   dpi: 150,
   isHexGrid: true,        // what the room reports
   square: false,          // the mode actually in use
-  squareOverride: null,   // null = auto, true/false = forced from the MAP tab
+  modeOverride: null,     // null/"auto" | "hexp" | "hexf" | "square" (MAP tab)
+  cellOverride: null,     // manual cell size in px (MAP tab slider), or null
 };
 
 function applyMode() {
-  grid.square = grid.squareOverride != null ? grid.squareOverride : !grid.isHexGrid;
+  const o = grid.modeOverride;
+  if (o === "square") { grid.square = true; }
+  else if (o === "hexp") { grid.square = false; grid.pointy = true; }
+  else if (o === "hexf") { grid.square = false; grid.pointy = false; }
+  else { grid.square = !grid.isHexGrid; grid.pointy = grid.autoPointy; }
 }
 
-export function setSquareOverride(v) {
-  grid.squareOverride = v; // null | true | false
+// mode: null/"auto" | "hexp" | "hexf" | "square"
+export function setGridOverride(mode) {
+  grid.modeOverride = mode === "auto" ? null : mode;
   applyMode();
+}
+
+// Manual cell size (px). null = use what calibration measured.
+export function setCellSize(px) {
+  grid.cellOverride = px && px > 4 ? px : null;
+  applyCellSize();
+}
+
+function applyCellSize() {
+  const px = grid.cellOverride;
+  if (px) {
+    grid.dpi = px;
+    grid.R = px / SQRT3;
+    grid.S = px;
+  }
 }
 
 export async function calibrate() {
   grid.dpi = await OBR.grid.getDpi();
   const type = await OBR.grid.getType();
   grid.isHexGrid = type === "HEX_VERTICAL" || type === "HEX_HORIZONTAL";
-  grid.pointy = type !== "HEX_HORIZONTAL";
+  grid.autoPointy = type !== "HEX_HORIZONTAL";
   grid.R = grid.dpi / SQRT3;
   grid.S = grid.dpi;
   applyMode();
@@ -69,7 +91,8 @@ export async function calibrate() {
         grid.R = spacing / SQRT3;
         const degMod = (Math.abs(near[0].ang) * 180) / Math.PI % 60;
         const offAxis = Math.min(degMod, 60 - degMod);
-        grid.pointy = offAxis < 15;
+        grid.autoPointy = offAxis < 15;
+        applyMode();
       }
     } else {
       // Square: measure cell size from a horizontal probe.
@@ -80,6 +103,7 @@ export async function calibrate() {
   } catch (e) {
     console.warn("[LANCER//UPLINK] grid calibration fell back to defaults", e);
   }
+  applyCellSize(); // a manual size override always wins over the probe
   grid.ready = true;
   return grid;
 }
@@ -208,19 +232,29 @@ export function hexLine(origin, rad, n) {
   return out;
 }
 
-// CONE n: wedge from origin (exclusive), length n. Half-angle is one grid
-// direction step, giving the classic widening spread on either grid type.
+// CONE n — Lancer RAW: at every distance d from the origin the cone is
+// exactly d cells wide (1 / 2 / 3 / …), forming the triangle from the core
+// rulebook diagrams. We bucket candidate cells by distance and keep the d
+// cells closest to the aim direction at each step.
 export function hexCone(origin, rad, n) {
   const o = hexToPixel(origin);
-  const candidates = hexesInRange(origin, n, false);
-  const halfAngle = (grid.square ? Math.PI / 4 : Math.PI / 6) + 0.02;
-  const out = [];
-  for (const h of candidates) {
+  const buckets = new Map(); // distance -> [{ h, a (|angle diff|), s (signed) }]
+  const limit = (grid.square ? Math.PI / 2 : Math.PI / 2) + 0.05; // never grab behind
+  for (const h of hexesInRange(origin, n, false)) {
+    const d = hexDistance(origin, h);
+    if (d < 1 || d > n) continue;
     const p = hexToPixel(h);
-    const ang = Math.atan2(p.y - o.y, p.x - o.x);
-    let diff = Math.abs(ang - rad);
-    if (diff > Math.PI) diff = 2 * Math.PI - diff;
-    if (diff <= halfAngle && hexDistance(origin, h) <= n) out.push(h);
+    let diff = Math.atan2(p.y - o.y, p.x - o.x) - rad;
+    while (diff > Math.PI) diff -= 2 * Math.PI;
+    while (diff < -Math.PI) diff += 2 * Math.PI;
+    if (Math.abs(diff) > limit) continue;
+    if (!buckets.has(d)) buckets.set(d, []);
+    buckets.get(d).push({ h, a: Math.abs(diff), s: diff });
+  }
+  const out = [];
+  for (let d = 1; d <= n; d++) {
+    const row = (buckets.get(d) || []).sort((x, y) => x.a - y.a || x.s - y.s);
+    out.push(...row.slice(0, d).map((x) => x.h));
   }
   return out;
 }

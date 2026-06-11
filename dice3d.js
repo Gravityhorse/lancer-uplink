@@ -113,12 +113,16 @@ function techTexture(baseColor, traceColor) {
   cv.width = cv.height = s;
   const ctx = cv.getContext("2d");
 
-  // base + subtle radial shading
+  // base + subtle radial shading (kept bright so colours stay saturated)
   ctx.fillStyle = baseColor;
   ctx.fillRect(0, 0, s, s);
+  ctx.globalCompositeOperation = "saturation";
+  ctx.fillStyle = "hsl(0, 65%, 50%)"; // push saturation up
+  ctx.fillRect(0, 0, s, s);
+  ctx.globalCompositeOperation = "source-over";
   const rg = ctx.createRadialGradient(s / 2, s / 2, s * 0.1, s / 2, s / 2, s * 0.75);
-  rg.addColorStop(0, "rgba(255,255,255,0.10)");
-  rg.addColorStop(1, "rgba(0,0,0,0.22)");
+  rg.addColorStop(0, "rgba(255,255,255,0.14)");
+  rg.addColorStop(1, "rgba(0,0,0,0.16)");
   ctx.fillStyle = rg;
   ctx.fillRect(0, 0, s, s);
 
@@ -201,7 +205,7 @@ export function createDiceTray(container, opts = {}) {
   const W = container.clientWidth || 360;
   const H = opts.height || 300;
   const TRAY = 9;
-  const HOVER_Y = 3.2; // staging altitude
+  const HOVER_Y = 4.2; // staging altitude — high enough to read as "held"
 
   const CAM_HOME = new THREE.Vector3(0, 21, 8.5);
   const LOOK_HOME = new THREE.Vector3(0, 0, 0);
@@ -231,9 +235,55 @@ export function createDiceTray(container, opts = {}) {
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
-  const grid = new THREE.GridHelper(TRAY * 2, 12, 0x343c4a, 0x232832);
+  const grid = new THREE.GridHelper(TRAY * 2, 12, 0x3a4a66, 0x232832);
   grid.position.y = 0.01;
   scene.add(grid);
+
+  // ---- holographic boundary walls -------------------------------------------
+  // Translucent cyan panels with a bright emissive rail along the top edge —
+  // simple sci-fi containment-field look.
+  {
+    const wallH = 1.6;
+    const panelMat = new THREE.MeshPhysicalMaterial({
+      color: 0x55ccee, transparent: true, opacity: 0.13,
+      emissive: 0x2aa8cc, emissiveIntensity: 0.5,
+      roughness: 0.2, metalness: 0.1, side: THREE.DoubleSide, depthWrite: false,
+    });
+    const railMat = new THREE.MeshBasicMaterial({ color: 0x7ee6ff, transparent: true, opacity: 0.65 });
+    const postMat = new THREE.MeshPhysicalMaterial({
+      color: 0x2b3a4d, emissive: 0x39c2e6, emissiveIntensity: 0.35,
+      roughness: 0.4, metalness: 0.7,
+    });
+    const mkWall = (w, x, z, ry) => {
+      const g = new THREE.Group();
+      const panel = new THREE.Mesh(new THREE.PlaneGeometry(w, wallH), panelMat);
+      panel.position.y = wallH / 2;
+      g.add(panel);
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(w, 0.07, 0.07), railMat);
+      rail.position.y = wallH;
+      g.add(rail);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, 0.16), postMat);
+      base.position.y = 0.05;
+      g.add(base);
+      g.position.set(x, 0, z);
+      g.rotation.y = ry;
+      scene.add(g);
+    };
+    mkWall(TRAY * 2, 0, -TRAY, 0);
+    mkWall(TRAY * 2, 0, TRAY, 0);
+    mkWall(TRAY * 2, -TRAY, 0, Math.PI / 2);
+    mkWall(TRAY * 2, TRAY, 0, Math.PI / 2);
+    // corner posts
+    for (const [px, pz] of [[-TRAY, -TRAY], [TRAY, -TRAY], [-TRAY, TRAY], [TRAY, TRAY]]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, wallH + 0.25, 6), postMat);
+      post.position.set(px, (wallH + 0.25) / 2, pz);
+      scene.add(post);
+    }
+    // a cool rim light so the walls read as light sources
+    const rim = new THREE.PointLight(0x66d9ff, 0.5, TRAY * 4);
+    rim.position.set(0, 3.5, 0);
+    scene.add(rim);
+  }
 
   // physics
   const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -38, 0) });
@@ -278,12 +328,15 @@ export function createDiceTray(container, opts = {}) {
     if (type === "d10") { for (let i = 0; i < values.length; i++) values[i] = (i + 1) % 10; }
 
     const c = dieColors(role);
-    const mat = new THREE.MeshStandardMaterial({
+    // Physical material: rough machined faces under a glossy clearcoat so the
+    // dice catch the light and pop against the dark tray.
+    const mat = new THREE.MeshPhysicalMaterial({
       map: techTexture(c.body, c.trace || "#ffffff"),
       color: "#ffffff",
-      roughness: 0.42, metalness: 0.38,
+      roughness: 0.55, metalness: 0.45,
+      clearcoat: 0.7, clearcoatRoughness: 0.22,
       emissive: new THREE.Color(c.emissive || "#000000"),
-      emissiveIntensity: role === "normal" ? 0.35 : 0.18,
+      emissiveIntensity: role === "normal" ? 0.4 : 0.2,
       flatShading: true,
     });
     const mesh = new THREE.Mesh(geometry, mat);
@@ -349,7 +402,7 @@ export function createDiceTray(container, opts = {}) {
     list.forEach((die, i) => {
       const cx = (i % cols) - (cols - 1) / 2;
       const cz = Math.floor(i / cols) - (cols - 1) / 2;
-      die.basePos.set(cx * 2.2, HOVER_Y, cz * 2.2 + 1.5);
+      die.basePos.set(cx * 2.2, HOVER_Y, cz * 2.2 + 2.4); // staged toward the camera
       die.staged = true;
       die.body.sleep();
       die.body.velocity.set(0, 0, 0);
@@ -414,6 +467,7 @@ export function createDiceTray(container, opts = {}) {
     return new Promise((resolve) => {
       if (rolling || !list.length) { resolve(null); return; }
       rolling = true;
+      resetCamera(); // pull back from the staging close-up for the throw
       stage(list);
       list.forEach((die) => {
         die.staged = false;
@@ -516,6 +570,11 @@ export function createDiceTray(container, opts = {}) {
 
   function resetCamera() { tweenCam(CAM_HOME, LOOK_HOME, 0.5); }
 
+  // Close-up on the staged (hovering) dice so they look big in the hand.
+  function stageView() {
+    tweenCam(new THREE.Vector3(0, 11.5, 11.5), new THREE.Vector3(0, HOVER_Y - 0.8, 2.0), 0.55);
+  }
+
   // ---- render + physics loop ----------------------------------------------------
   let glitchT = 0;
   let raf = 0;
@@ -559,11 +618,11 @@ export function createDiceTray(container, opts = {}) {
       const f = 0.3 + 0.7 * Math.abs(Math.sin(glitchT * 9.3));
       dice.forEach((d) => {
         if (d.role === "normal") d.mesh.material.emissiveIntensity = f;
-        if (rolling && Math.random() < 0.12) {
-          // visual-only teleport stutter; physics body is untouched
-          d.mesh.position.x += (Math.random() - 0.5) * 0.45;
-          d.mesh.position.z += (Math.random() - 0.5) * 0.45;
-          const sc = 0.85 + Math.random() * 0.4;
+        // gentle corruption stutter — kept subtle (no strobe / flash risk)
+        if (rolling && Math.random() < 0.05) {
+          d.mesh.position.x += (Math.random() - 0.5) * 0.18;
+          d.mesh.position.z += (Math.random() - 0.5) * 0.18;
+          const sc = 0.94 + Math.random() * 0.12;
           d.mesh.scale.setScalar(sc);
         } else if (!rolling) {
           d.mesh.scale.setScalar(1);
@@ -604,7 +663,7 @@ export function createDiceTray(container, opts = {}) {
 
   return {
     addDie, addAccDie, clearTray, listDice, roll, rollExtra, replay,
-    zoomToDice, resetCamera, resize, dispose,
+    zoomToDice, resetCamera, stageView, resize, dispose,
     count: () => dice.length,
     isRolling: () => rolling,
   };

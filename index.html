@@ -77,7 +77,7 @@
       .mech-head .pilot { color: var(--muted); font-size: 11px; margin-top: 2px; font-family: var(--mono); }
       .mech-head .sizehex { position: absolute; top: 10px; right: 12px; font-family: var(--mono); font-size: 10px; color: var(--muted); border: 1px solid var(--line); padding: 3px 7px; clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); background: var(--panel-2); }
 
-      .mobility { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-bottom: 8px; }
+      .mobility { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; margin-bottom: 8px; }
       .mob-btn { border: none; cursor: pointer; padding: 7px 4px; font-family: var(--font); font-weight: 700; font-size: 11px; letter-spacing: 1px; color: #fff; clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 100%, 7px 100%); }
       .mob-btn small { display: block; font-weight: 400; font-size: 9px; opacity: 0.85; letter-spacing: 0.5px; }
       .mob-btn.green { background: #2f7d49; }
@@ -144,14 +144,25 @@
 
       #traywrap { position: relative; }
       .dicetray { width: 100%; height: 270px; background: radial-gradient(ellipse at 50% 30%, #1b2230 0%, #0e1014 100%); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-      /* HORUS cascade corruption while rolling */
-      .dicetray.glitching canvas { animation: hglitch 0.16s steps(2) infinite; }
+      /* HORUS cascade corruption while rolling — kept gentle (no strobing) */
+      .dicetray.glitching canvas { animation: hglitch 0.6s ease-in-out infinite; }
       @keyframes hglitch {
         0% { filter: none; transform: translate(0, 0); }
-        40% { filter: hue-rotate(70deg) saturate(2.2) contrast(1.2); transform: translate(1.5px, -1px); }
-        60% { filter: hue-rotate(-50deg) saturate(1.6); transform: translate(-1.5px, 1px) scaleX(1.005); }
+        45% { filter: hue-rotate(25deg) saturate(1.3); transform: translate(0.6px, -0.4px); }
+        70% { filter: hue-rotate(-18deg) saturate(1.15); transform: translate(-0.6px, 0.4px); }
         100% { filter: none; transform: translate(0, 0); }
       }
+
+      /* NHP nat-1 commentary — brief glitchy whisper over the tray */
+      #nhp-quip { position: absolute; top: 46%; left: 50%; transform: translate(-50%, -50%); z-index: 6; display: none; max-width: 86%; text-align: center; font-family: var(--mono); font-size: 12.5px; letter-spacing: 1px; color: #d6ffe6; background: rgba(8, 14, 10, 0.82); border: 1px solid #2faa5b; border-radius: 4px; padding: 7px 12px; pointer-events: none; text-shadow: 0 0 6px rgba(125, 255, 176, 0.8); }
+      #nhp-quip.show { display: block; animation: quipglitch 0.45s steps(3) infinite, quipfade 3.8s linear forwards; }
+      @keyframes quipglitch {
+        0% { transform: translate(-50%, -50%); clip-path: inset(0 0 0 0); }
+        33% { transform: translate(calc(-50% + 1px), calc(-50% - 1px)); clip-path: inset(0 0 6% 0); }
+        66% { transform: translate(calc(-50% - 1px), -50%); clip-path: inset(4% 0 0 0); }
+        100% { transform: translate(-50%, -50%); clip-path: inset(0 0 0 0); }
+      }
+      @keyframes quipfade { 0% { opacity: 0; } 8% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
 
       #resultbox { position: absolute; top: 10px; left: 10px; display: none; align-items: center; gap: 8px; z-index: 5; }
       #resultbox.show { display: flex; }
@@ -338,6 +349,7 @@
             <button id="resultclear" title="Clear roll data">✕</button>
           </div>
           <div id="remote-banner"></div>
+          <div id="nhp-quip"></div>
           <div id="trayui">
             <button id="rolldice" class="btn">ROLL</button>
             <button id="cleardice" class="btn ghost">CLEAR</button>
@@ -368,6 +380,7 @@
             <span class="steplbl">FLAT&nbsp;MOD</span>
           </div>
           <label class="chk" id="ok-wrap" title="Damage dice showing 1 explode into bonus dice; +1 Heat per 1"><input id="overkill-toggle" type="checkbox" /> OVERKILL</label>
+          <label class="chk" id="crit-wrap" title="Crit damage: every damage die is rolled twice, keep the highest of each pair"><input id="crit-toggle" type="checkbox" /> CRIT</label>
           <label class="chk" title="Keep only the highest normal die"><input id="keephigh" type="checkbox" /> KEEP HIGH</label>
           <label class="chk" title="Roll stays on your screen only"><input id="hideroll" type="checkbox" /> HIDDEN</label>
         </div>
@@ -384,6 +397,17 @@
       <!-- ============================ MAP ============================ -->
       <section id="tab-map" class="tabpane">
         <details open>
+          <summary>RANGE FIELDS</summary>
+          <div class="body">
+            <div class="mobility" style="margin-bottom:0">
+              <button class="mob-btn green" id="map-move" disabled>MOVE<small>load a pilot</small></button>
+              <button class="mob-btn blue" id="map-sensors" disabled>SENSORS<small>load a pilot</small></button>
+            </div>
+            <p class="muted" style="margin:6px 0 0">MOVE cycles: move → move&nbsp;+&nbsp;boost → off. SENSORS toggles on/off.</p>
+          </div>
+        </details>
+
+        <details open>
           <summary>TOKEN BOND</summary>
           <div class="body">
             <p class="muted" style="margin:0 0 8px; line-height:1.5">Select your mech's token on the map, then bond it. MOVE / BOOST / SENSORS fields will centre on it automatically and follow it when it moves.</p>
@@ -399,7 +423,7 @@
           <summary>TEMPLATES</summary>
           <div class="body">
             <p class="muted" style="margin:0 0 8px; line-height:1.5">
-              Select the <b>LANCER</b> tool in Owlbear's left toolbar — Blast / Cone / Line / Move / Sensors / Terrain / Erase appear in the top-centre mode bar.
+              Select the <b>LANCER</b> tool in Owlbear's left toolbar — Blast / Cone / Line / Erase appear in the top-centre mode bar.
               <b>Click-drag</b>: the press point is the origin; drag out to size and aim. Everything snaps to the grid.
             </p>
             <div class="row" style="margin-bottom:6px">
@@ -407,20 +431,25 @@
             </div>
             <div class="row">
               <button id="clearmine" class="btn ghost small">CLEAR MY TEMPLATES</button>
-              <button id="clearterrain" class="btn ghost small">CLEAR TERRAIN</button>
-            </div>
-            <div class="row" style="margin-top:6px">
               <button id="clearranges" class="btn ghost small">CLEAR MY RANGE FIELDS</button>
             </div>
           </div>
         </details>
 
         <details open>
-          <summary>GRID</summary>
+          <summary>GRID CALIBRATION</summary>
           <div class="body">
             <div class="muted" id="grid-readout" style="font-family:var(--mono)">Waiting for a scene…</div>
-            <label class="chk" style="margin-top:8px"><input id="square-toggle" type="checkbox" /> SQUARE GRID MODE (king-move ranges)</label>
-            <button id="btn-recal" class="btn ghost small" style="margin-top:8px">RE-PROBE GRID</button>
+            <label style="margin-top:10px">Grid type</label>
+            <select id="grid-mode">
+              <option value="auto">AUTO (match the room)</option>
+              <option value="hexp">HEX — POINTY TOP (flats on the sides)</option>
+              <option value="hexf">HEX — FLAT TOP (flats on top &amp; bottom)</option>
+              <option value="square">SQUARE (king-move ranges)</option>
+            </select>
+            <label style="margin-top:10px">Tile size <span id="cell-size-val" style="color:var(--text);font-family:var(--mono)">150 px</span></label>
+            <input id="cell-size" type="range" min="30" max="600" step="2" value="150" style="width:100%" />
+            <button id="btn-fit" class="btn blue small" style="margin-top:8px;width:100%" title="Re-probe the scene's grid and match tile size & orientation to it">⌖ FIT TO SCENE</button>
           </div>
         </details>
 

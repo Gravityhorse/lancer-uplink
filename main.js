@@ -23,8 +23,6 @@ import {
   showLocalOverlay,
   showBoostField,
   clearBoostField,
-  clearTerrain,
-  renderTerrain,
 } from "./overlay.js";
 import {
   loadCompendium, listPilots, parsePilot, resolveMech,
@@ -68,7 +66,8 @@ function saveState() {
         live,
         scheme: $("scheme")?.value || null,
         vis: tool.getTemplateVisibility(),
-        square: $("square-toggle")?.checked || false,
+        gridMode: $("grid-mode")?.value || "auto",
+        cellSize: hex.grid.cellOverride,
         macro: $("macro-toggle")?.checked || false,
         bond,
       }));
@@ -417,16 +416,17 @@ $("btn-unbond")?.addEventListener("click", async () => {
   for (const kind of Object.keys(activeFields)) await removeField(kind);
 });
 
-const fieldColor = (kind) => (kind === "sensors" ? "#3da5ff" : "#5ad17a");
+const fieldColor = (kind) =>
+  kind === "sensors" ? "#3da5ff" : kind === "weapon" ? "#d22f3d" : "#5ad17a";
 
-async function placeFieldAt(kind, center, size, boost) {
+async function placeFieldAt(kind, center, size, boost, label) {
   if (boost) {
     await showBoostField("field-boost", center, size, { color: fieldColor(kind), name: `Boost ${size}` });
   } else {
     await showLocalOverlay(`field-${kind}`, hex.hexesInRange(center, size, true), {
       color: fieldColor(kind),
       fillOpacity: 0.18, strokeOpacity: 0.85, strokeWidth: 3,
-      name: `${kind === "sensors" ? "Sensors" : "Move"} ${size}`,
+      name: label || `${kind === "sensors" ? "Sensors" : kind === "weapon" ? "Range" : "Move"} ${size}`,
       kind: "range",
     });
   }
@@ -439,11 +439,11 @@ async function removeField(kind) {
   markMobilityActive();
 }
 
-async function toggleField(kind, size, boost = false) {
+async function toggleField(kind, size, boost = false, label = null) {
   if (activeFields[kind]) { await removeField(kind); return; }
   const item = await getBondItem();
   if (item) {
-    await placeFieldAt(kind, hex.pixelToHex(item.position), size, boost);
+    await placeFieldAt(kind, hex.pixelToHex(item.position), size, boost, label);
     activeFields[kind] = { size, boost };
     markMobilityActive();
     setStatus(`${kind.toUpperCase()} field on "${bond.name}". Click the button again to clear.`, "status-ok");
@@ -452,9 +452,9 @@ async function toggleField(kind, size, boost = false) {
   // no bond — fall back to click-to-place via the toolbar tool
   try {
     await tool.armTemplate({
-      shape: kind === "sensors" ? "tech" : "move",
+      shape: kind === "sensors" ? "tech" : kind === "weapon" ? "weapon" : "move",
       size, boost,
-      name: `${kind === "boost" ? "Boost" : kind === "sensors" ? "Sensors" : "Move"} ${size}`,
+      name: label || `${kind === "boost" ? "Boost" : kind === "sensors" ? "Sensors" : kind === "weapon" ? "Range" : "Move"} ${size}`,
     });
     setStatus(`Armed ${kind} (${size}${boost ? `+${size} boost` : ""}). Click your hex on the map — or bond a token in the MAP tab to skip this step.`, "status-ok");
   } catch (_) {
@@ -462,9 +462,39 @@ async function toggleField(kind, size, boost = false) {
   }
 }
 
+// MOVE button cycle: off → MOVE → MOVE+BOOST (double radius, boundary ring) → off
+let moveState = 0; // 0 off, 1 move, 2 move+boost
+async function cycleMove() {
+  if (!currentMech) return setStatus("Load a pilot first.", "status-err");
+  const speed = currentMech.stats.speed;
+  if (activeFields.move) await removeField("move");
+  if (activeFields.boost) await removeField("boost");
+  moveState = (moveState + 1) % 3;
+  if (moveState === 1) {
+    await toggleField("move", speed);
+  } else if (moveState === 2) {
+    await toggleField("boost", speed, true);
+  }
+  markMobilityActive();
+}
+
+async function toggleSensors() {
+  if (!currentMech) return setStatus("Load a pilot first.", "status-err");
+  await toggleField("sensors", currentMech.stats.sensors);
+}
+
 function markMobilityActive() {
-  document.querySelectorAll(".mob-btn[data-mob]").forEach((b) => {
-    b.classList.toggle("on", !!activeFields[b.dataset.mob]);
+  const moveOn = !!(activeFields.move || activeFields.boost);
+  document.querySelectorAll('[data-mob="move"]').forEach((b) => {
+    b.classList.toggle("on", moveOn);
+    const sm = b.querySelector("small");
+    if (sm && currentMech) {
+      const sp = currentMech.stats.speed;
+      sm.textContent = moveState === 2 ? `BOOST ${sp}+${sp}` : `${sp} HEX`;
+    }
+  });
+  document.querySelectorAll('[data-mob="sensors"]').forEach((b) => {
+    b.classList.toggle("on", !!activeFields.sensors);
   });
 }
 
@@ -472,14 +502,25 @@ function markMobilityActive() {
 function renderMobility(s) {
   const el = $("mobility");
   el.innerHTML = `
-    <button class="mob-btn green" data-mob="move">MOVE<small>${s.speed} HEX</small></button>
-    <button class="mob-btn green" data-mob="boost">BOOST<small>${s.speed} (+${s.speed})</small></button>
-    <button class="mob-btn blue" data-mob="sensors">SENSORS<small>${s.sensors} HEX</small></button>
-    <button class="mob-btn blue" data-mob="techatk">TECH ATK<small>${s.techAttack >= 0 ? "+" : ""}${s.techAttack}</small></button>`;
-  el.querySelector('[data-mob="move"]').addEventListener("click", () => toggleField("move", s.speed));
-  el.querySelector('[data-mob="boost"]').addEventListener("click", () => toggleField("boost", s.speed, true));
-  el.querySelector('[data-mob="sensors"]').addEventListener("click", () => toggleField("sensors", s.sensors));
-  el.querySelector('[data-mob="techatk"]').addEventListener("click", () => prepareTechAttack());
+    <button class="mob-btn green" data-mob="move" title="Cycle: move → move+boost → off">MOVE<small>${s.speed} HEX</small></button>
+    <button class="mob-btn blue" data-mob="sensors" title="Toggle sensor range">SENSORS<small>${s.sensors} HEX</small></button>`;
+  el.querySelector('[data-mob="move"]').addEventListener("click", cycleMove);
+  el.querySelector('[data-mob="sensors"]').addEventListener("click", toggleSensors);
+
+  // mirror buttons on the MAP tab
+  const mm = $("map-move"), ms = $("map-sensors");
+  if (mm) {
+    mm.disabled = false;
+    mm.dataset.mob = "move";
+    mm.innerHTML = `MOVE<small>${s.speed} HEX</small>`;
+    mm.onclick = cycleMove;
+  }
+  if (ms) {
+    ms.disabled = false;
+    ms.dataset.mob = "sensors";
+    ms.innerHTML = `SENSORS<small>${s.sensors} HEX</small>`;
+    ms.onclick = toggleSensors;
+  }
   markMobilityActive();
 }
 
@@ -523,12 +564,12 @@ function renderCC(s) {
     `<div class="ccpips">
       <span>STRUCT <b>${"◆".repeat(live.structure)}${"◇".repeat(Math.max(0, s.structureMax - live.structure))}</b> ${pp("structure")}</span>
       <span>STRESS <b>${"◆".repeat(live.stress)}${"◇".repeat(Math.max(0, s.stressMax - live.stress))}</b> ${pp("stress")}</span>
-      <span>O.SHLD <b>${live.overshield}</b> ${pp("overshield")}</span>
     </div>
     <div class="ccpips">
       <span>EVA <b>${s.evasion}</b></span><span>E-DEF <b>${s.edef}</b></span>
       <span>ARMOR <b>${s.armor}</b></span><span>SAVE <b>${s.save}</b></span>
       <span>GRIT <b>+${s.attackBonus}</b></span>
+      <span>O.SHLD <b>${live.overshield}</b> ${pp("overshield")}</span>
     </div>`;
 
   // HP / Heat / Repair / Core steppers — with structure & stress automation
@@ -667,14 +708,36 @@ function rangeBits(w) {
   return bits.join(" · ") || "—";
 }
 
+// AoE shapes arm a placeable template; plain range/threat shows a private
+// red range FIELD around your token instead (field: true).
 function weaponTemplateSpec(w) {
   if (w.blast > 0) return { shape: "blast", size: w.blast, name: `${w.name} · Blast ${w.blast}` };
   if (w.cone > 0) return { shape: "cone", size: w.cone, name: `${w.name} · Cone ${w.cone}` };
   if (w.line > 0) return { shape: "line", size: w.line, name: `${w.name} · Line ${w.line}` };
   if (w.burst > 0) return { shape: "blast", size: w.burst, name: `${w.name} · Burst ${w.burst}` };
-  if (w.range > 0) return { shape: "blast", size: w.range, name: `${w.name} · Range ${w.range}` };
-  if (w.threat > 0) return { shape: "blast", size: w.threat, name: `${w.name} · Threat ${w.threat}` };
+  if (w.range > 0) return { shape: "weapon", size: w.range, name: `${w.name} · Range ${w.range}`, field: true };
+  if (w.threat > 0) return { shape: "weapon", size: w.threat, name: `${w.name} · Threat ${w.threat}`, field: true };
   return null;
+}
+
+// Action-economy exceptions: weapons that fire outside the normal
+// Skirmish / Barrage economy.
+const ACTION_OVERRIDES = [
+  { re: /autopod/i, full: false, title: "Protocol — fires automatically at a target with LOCK ON, no attack roll" },
+  { re: /autogun/i, full: false, title: "Automated — fires on its own (see system text)" },
+  { re: /nexus.*swarm|swarm.*nexus/i, full: false, title: "Quick action (Skirmish) — see nexus rules" },
+];
+
+function weaponActionInfo(w, mountLabel) {
+  for (const o of ACTION_OVERRIDES) {
+    if (o.re.test(w.name || "")) {
+      return { icon: o.full ? ICON_FULL : ICON_QUICK, title: o.title };
+    }
+  }
+  const isFull = /superheavy/i.test(w.mountSize || "") || /superheavy/i.test(mountLabel || "");
+  return isFull
+    ? { icon: ICON_FULL, title: "Full action (Barrage — Superheavy weapons cannot Skirmish)" }
+    : { icon: ICON_QUICK, title: "Quick action (Skirmish)" };
 }
 
 function renderMounts(m) {
@@ -696,11 +759,11 @@ function renderMounts(m) {
       mountsEl.appendChild(empty);
       return;
     }
-    mt.weapons.forEach((w) => mountsEl.appendChild(weaponCard(w)));
+    mt.weapons.forEach((w) => mountsEl.appendChild(weaponCard(w, mt.label)));
   });
 }
 
-function weaponCard(w) {
+function weaponCard(w, mountLabel) {
   const el = document.createElement("div");
   el.className = "weapon";
   const tags = [];
@@ -708,21 +771,16 @@ function weaponCard(w) {
   if (w.loading) tags.push("LOADING");
   const spec = weaponTemplateSpec(w);
   const tmplBtn = spec
-    ? `<button class="btn small ghost" data-act="tmpl" title="Arm ${spec.name} template">◈</button>`
+    ? `<button class="btn small ghost" data-act="tmpl" title="${spec.field ? `Toggle ${spec.name} field around your token` : `Arm ${spec.name} template`}">◈</button>`
     : "";
-  // Superheavy weapons fire as a Barrage (Full Action); everything else
-  // can Skirmish (Quick Action).
-  const isFull = /superheavy/i.test(w.mountSize || "");
-  const actIcon = isFull ? ICON_FULL : ICON_QUICK;
-  const actTitle = isFull ? "Full action (Barrage)" : "Quick action (Skirmish)";
+  const act = weaponActionInfo(w, mountLabel);
   el.innerHTML = `
     <div class="top">
-      <span class="wname" data-act="info" title="${actTitle} — hover for weapon details">${actIcon}${w.name}</span>
+      <span class="wname" data-act="info" title="${act.title} — hover for weapon details">${act.icon}${w.name}</span>
       <span>
         ${tmplBtn}
         <button class="btn small" data-act="atk" title="Attack roll: d20 + grit">ATK</button>
         <button class="btn small lock" data-act="lock" title="Target lock: roll accuracy, then FIRE for damage">⬢</button>
-        <button class="btn small ghost" data-act="dmg" title="Damage roll only (no grit — grit is attack-only)">DMG</button>
       </span>
     </div>
     <div class="meta">${[w.mountSize, w.type].filter(Boolean).join(" ")} — ${rangeBits(w)} — <b>${w.damage}</b></div>
@@ -730,7 +788,6 @@ function weaponCard(w) {
   `;
   el.querySelector('[data-act="atk"]').addEventListener("click", () => prepareWeaponAttack(w, false));
   el.querySelector('[data-act="lock"]').addEventListener("click", () => prepareWeaponAttack(w, true));
-  el.querySelector('[data-act="dmg"]').addEventListener("click", () => prepareWeaponDamage(w, false, false));
   // hover the weapon name → full tooltip
   const nameEl = el.querySelector('[data-act="info"]');
   const body = [
@@ -738,11 +795,16 @@ function weaponCard(w) {
     w.tagNames?.length ? `TAGS: ${w.tagNames.join(", ")}` : "",
     w.effect || "",
   ].filter(Boolean).join("  •  ");
-  nameEl.addEventListener("mouseenter", (e) => showTip(`${w.name} — ${actTitle}`, body, e));
+  nameEl.addEventListener("mouseenter", (e) => showTip(`${w.name} — ${act.title}`, body, e));
   nameEl.addEventListener("mousemove", moveTooltip);
   nameEl.addEventListener("mouseleave", hideTooltip);
   if (spec) {
     el.querySelector('[data-act="tmpl"]').addEventListener("click", async () => {
+      if (spec.field) {
+        // plain Range / Threat → red private field around your token
+        await toggleField("weapon", spec.size, false, spec.name);
+        return;
+      }
       try {
         await tool.armTemplate(spec);
         setStatus(`Armed ${spec.name}. Click the map to place it.`, "status-ok");
@@ -763,12 +825,14 @@ function renderTechCard(s) {
       <div class="top">
         <span class="wname" title="Quick action (Quick Tech)">${ICON_QUICK}TECH ATTACK</span>
         <span>
+          <button class="btn small ghost" data-act="trange" title="Toggle sensor range field (tech attacks reach anything in Sensors)">◈</button>
           <button class="btn small blue" data-act="tatk" title="Tech attack: d20 ${sign}">TECH ATK</button>
           <button class="btn small lock blue" data-act="tlock" title="Roll tech accuracy with the lock flow">⬢</button>
         </span>
       </div>
       <div class="meta">d20 ${sign} vs E-DEF — Sensors ${s.sensors}</div>
     </div>`;
+  el.querySelector('[data-act="trange"]').addEventListener("click", toggleSensors);
   el.querySelector('[data-act="tatk"]').addEventListener("click", () => prepareTechAttack());
   el.querySelector('[data-act="tlock"]').addEventListener("click", () => prepareTechAttack());
 }
@@ -785,11 +849,17 @@ function renderInvades(m) {
   const wrap = $("invades");
   if (!wrap) return;
   wrap.innerHTML = "";
+  // Any system-granted tech option shows up here: dedicated Invade options
+  // (Markerlight, HUNTER logic, the HORUS OS suites…) plus Quick/Full Tech
+  // actions from installed systems.
   const sysInvades = [];
   for (const sys of m.systems) {
     for (const a of sys.actionsFull || []) {
-      if (/invade/i.test(a.activation || "")) {
+      const act = a.activation || "";
+      if (/invade/i.test(act)) {
         sysInvades.push({ name: `Invade — ${a.name}`, activation: "Quick Tech (Invade)", detail: a.detail || sys.description || "" });
+      } else if (/tech/i.test(act)) {
+        sysInvades.push({ name: a.name, activation: act, detail: a.detail || sys.description || "" });
       }
     }
   }
@@ -935,7 +1005,7 @@ function addQueued(type, role = "normal", as = null, pair = null) {
   if (!diceTray || diceBusy) return;
   diceTray.addDie(type, role);
   trayQueue.push({ type, role, as, pair });
-  diceTray.resetCamera();
+  diceTray.stageView(); // close-up on the hovering dice while you build the pool
   hideResult();
   updateAdvCount();
 }
@@ -973,7 +1043,39 @@ okToggle?.addEventListener("change", () => $("ok-wrap")?.classList.toggle("ok-on
 const setOverkill = (on) => {
   if (okToggle) { okToggle.checked = on; $("ok-wrap")?.classList.toggle("ok-on", on); }
 };
+const critToggle = $("crit-toggle");
+critToggle?.addEventListener("change", () => $("crit-wrap")?.classList.toggle("ok-on", critToggle.checked));
+const setCrit = (on) => {
+  if (critToggle) { critToggle.checked = on; $("crit-wrap")?.classList.toggle("ok-on", on); }
+};
 const rollsHidden = () => $("hideroll")?.checked || false;
+
+// ---- NHP commentary on a natural 1 ------------------------------------------------
+const NHP_QUIPS = [
+  "Such a shame.",
+  "Feeling a bit desperate, aren't we?",
+  ">It's alright. >I'm not one to judge.",
+  "It's been a long day. Have some soup.",
+  "I ran the numbers. All of them. You still did that.",
+  "Statistically fascinating. Tactically… less so.",
+  "I will not be mentioning this in the after-action report. You're welcome.",
+  "The dice are not broken. I checked. Twice.",
+  "A bold interpretation of 'aim'.",
+  "Recalibrating expectations…",
+  "Your ancestors are watching. They've seen worse. Barely.",
+  ">>query: was that intentional?",
+];
+let quipTimer = 0;
+function showQuip() {
+  const el = $("nhp-quip");
+  if (!el) return;
+  el.textContent = NHP_QUIPS[Math.floor(Math.random() * NHP_QUIPS.length)];
+  el.classList.remove("show");
+  void el.offsetWidth; // restart the CSS animation
+  el.classList.add("show");
+  clearTimeout(quipTimer);
+  quipTimer = setTimeout(() => el.classList.remove("show"), 3900);
+}
 
 // ---- result popup -------------------------------------------------------------
 function showResult({ total, sub, kind = "atk", crit = "" }) {
@@ -1035,6 +1137,7 @@ async function prepareWeaponAttack(w, lock) {
   const grit = currentPilot ? currentPilot.grit : 0;
   setFlat(grit);
   setOverkill(false);
+  setCrit(false);
   addQueued("d20", "normal");
   setContext(
     `${w.name.toUpperCase()} — ATTACK · d20 +${grit} GRIT${lock ? "  [LOCK: FIRE after accuracy]" : ""}`,
@@ -1058,21 +1161,14 @@ async function prepareWeaponDamage(w, fire, crit) {
   hideResult();
   setFlat(parsed.flat);
   setOverkill(!!w.overkill);
-  const queueOne = (faces, pair) => {
-    if (faces === 3) addQueued("d6", "normal", "d3", pair);
-    else if ([4, 6, 8, 10, 12, 20].includes(faces)) addQueued(`d${faces}`, "normal", null, pair);
-    else addQueued("d6", "normal", null, pair); // unknown faces — approximate
+  setCrit(!!crit); // doRoll doubles the dice (keep highest per pair) when set
+  const queueOne = (faces) => {
+    if (faces === 3) addQueued("d6", "normal", "d3");
+    else if ([4, 6, 8, 10, 12, 20].includes(faces)) addQueued(`d${faces}`, "normal");
+    else addQueued("d6", "normal"); // unknown faces — approximate
   };
   for (const g of parsed.dice) {
-    for (let i = 0; i < g.n; i++) {
-      if (crit) {
-        const pid = ++pairSeq;
-        queueOne(g.faces, pid);
-        queueOne(g.faces, pid);
-      } else {
-        queueOne(g.faces, null);
-      }
-    }
+    for (let i = 0; i < g.n; i++) queueOne(g.faces);
   }
   setContext(
     `${w.name.toUpperCase()} — DAMAGE · ${w.damage}${crit ? " · CRIT (dice doubled, keep highest)" : ""}${w.overkill ? " · OVERKILL" : ""}`,
@@ -1094,6 +1190,7 @@ async function prepareTechAttack(label = "TECH ATTACK") {
   const t = currentMech ? currentMech.stats.techAttack : 0;
   setFlat(t);
   setOverkill(false);
+  setCrit(false);
   addQueued("d20", "normal");
   setContext(`${label} · d20 ${t >= 0 ? "+" : ""}${t} vs E-DEF`, "tech", null);
 }
@@ -1118,7 +1215,23 @@ async function doRoll() {
     const flat = getFlat();
     const keepHighest = $("keephigh")?.checked || false;
     const overkill = okToggle?.checked || false;
+    const critOn = critToggle?.checked || false;
     const ctx = { ...pending };
+
+    // CRIT toggle: duplicate every (non-d20) damage die into a pair before
+    // the throw — only the highest of each pair will count.
+    if (critOn) {
+      const snapshot = trayQueue.slice();
+      snapshot.forEach((meta, i) => {
+        if (meta.role === "normal" && meta.type !== "d20" && meta.pair == null) {
+          const pid = ++pairSeq;
+          trayQueue[i] = { ...meta, pair: pid };
+          diceTray.addDie(meta.type, meta.role);
+          trayQueue.push({ type: meta.type, role: meta.role, as: meta.as, pair: pid });
+        }
+      });
+      updateAdvCount();
+    }
 
     let raw = await diceTray.roll(1); // [{type, role, value}] in queue order
     if (!raw || !raw.length) return;
@@ -1173,12 +1286,18 @@ async function doRoll() {
     const res = compute(effKept, { keepHighest, flat });
 
     // crit & labels (Lancer: an attack totalling 20+ crits; nat 1 always whiffs)
+    // Lancer crit rule: ANY attack totalling 20+ crits — there are no special
+    // natural 20s. A natural 1 still earns commentary from the NHP.
     let critTxt = "";
     let isCrit = false;
     if (res.d20 != null) {
-      if (res.d20 === 20) { critTxt = "⚡ NAT 20 — CRIT"; isCrit = true; }
-      else if (res.d20 === 1) critTxt = "✘ NAT 1";
-      else if ((ctx.kind === "atk" || ctx.kind === "tech") && res.total >= 20) { critTxt = "⚡ CRIT (20+)"; isCrit = true; }
+      if (res.d20 === 1) {
+        critTxt = "✘ NAT 1";
+        showQuip();
+      } else if ((ctx.kind === "atk" || ctx.kind === "tech") && res.total >= 20) {
+        critTxt = "⚡ CRIT (20+)";
+        isCrit = true;
+      }
     }
 
     const facesTxt = eff.map((d, i) => {
@@ -1316,21 +1435,44 @@ $("clearmine")?.addEventListener("click", async () => {
   try { await clearMyTemplates(); await clearLocalTemplates(); }
   catch (e) { console.warn("[LANCER//UPLINK] clear templates failed", e); }
 });
-$("clearterrain")?.addEventListener("click", async () => {
-  try { await clearTerrain(); await renderTerrain([], hex.keyToHex); }
-  catch (e) { console.warn("[LANCER//UPLINK] clear terrain failed", e); }
-});
 $("clearranges")?.addEventListener("click", async () => {
   try { await clearAllLocalOverlays(); } catch (_) {}
   activeFields = {};
+  moveState = 0;
   markMobilityActive();
 });
 
-$("square-toggle")?.addEventListener("change", () => {
-  hex.setSquareOverride($("square-toggle").checked ? true : null);
+// ---- grid calibration controls -----------------------------------------------
+$("grid-mode")?.addEventListener("change", () => {
+  hex.setGridOverride($("grid-mode").value);
   refreshGridReadout();
   saveState();
 });
+
+const cellSlider = $("cell-size");
+function syncCellSlider() {
+  if (!cellSlider) return;
+  const px = Math.round(hex.grid.dpi);
+  cellSlider.value = String(Math.max(30, Math.min(600, px)));
+  const v = $("cell-size-val");
+  if (v) v.textContent = `${px} px${hex.grid.cellOverride ? " (manual)" : ""}`;
+}
+cellSlider?.addEventListener("input", () => {
+  hex.setCellSize(Number(cellSlider.value));
+  const v = $("cell-size-val");
+  if (v) v.textContent = `${cellSlider.value} px (manual)`;
+  refreshGridReadout();
+  saveState();
+});
+
+$("btn-fit")?.addEventListener("click", async () => {
+  hex.setCellSize(null); // drop the manual override, trust the probe
+  await recalibrate();
+  syncCellSlider();
+  saveState();
+  setStatus("Grid re-probed and matched to the scene.", "status-ok");
+});
+
 $("macro-toggle")?.addEventListener("change", saveState);
 
 function refreshGridReadout() {
@@ -1338,9 +1480,9 @@ function refreshGridReadout() {
   if (!el) return;
   const g = hex.grid;
   if (!g.ready) { el.textContent = "Waiting for a scene…"; return; }
-  const mode = g.square ? "SQUARE (king-move ranges)" : `HEX ${g.pointy ? "(pointy-top)" : "(flat-top)"}`;
-  const src = g.squareOverride != null ? " · manual override" : ` · room reports ${g.isHexGrid ? "hex" : "square"}`;
-  el.textContent = `${mode} · DPI ${g.dpi}${src}`;
+  const mode = g.square ? "SQUARE (king-move)" : `HEX ${g.pointy ? "POINTY-TOP" : "FLAT-TOP"}`;
+  const src = g.modeOverride ? "manual" : `auto (room: ${g.isHexGrid ? "hex" : "square"})`;
+  el.textContent = `${mode} · tile ${Math.round(g.dpi)}px${g.cellOverride ? " (manual)" : ""} · ${src}`;
 }
 
 // ============================================================== OBR STARTUP ====
@@ -1348,10 +1490,11 @@ async function recalibrate() {
   try {
     await hex.calibrate();
     refreshGridReadout();
+    syncCellSlider();
   } catch (e) {
     console.warn("[LANCER//UPLINK] calibration failed", e);
     const el = $("grid-readout");
-    if (el) el.textContent = "Calibration failed — open a scene, then RE-PROBE.";
+    if (el) el.textContent = "Calibration failed — open a scene, then FIT TO SCENE.";
   }
 }
 
@@ -1376,8 +1519,6 @@ async function start() {
   } catch (e) {
     console.warn("[LANCER//UPLINK] scene readiness check failed", e);
   }
-
-  $("btn-recal")?.addEventListener("click", recalibrate);
 
   // 3) Bonded-token follow: re-centre active range fields when it moves.
   try {
@@ -1418,10 +1559,13 @@ async function start() {
   const st = readStore();
   if (st.vis) tool.setTemplateVisibility(st.vis);
   refreshVisBtn();
-  if ($("square-toggle")) {
-    $("square-toggle").checked = !!st.square;
-    hex.setSquareOverride(st.square ? true : null);
-  }
+  // grid: mode override + manual tile size (also handles pre-2.2 "square" key)
+  const mode = st.gridMode || (st.square ? "square" : "auto");
+  if ($("grid-mode")) $("grid-mode").value = mode;
+  hex.setGridOverride(mode);
+  if (st.cellSize) hex.setCellSize(st.cellSize);
+  syncCellSlider();
+  refreshGridReadout();
   if ($("macro-toggle")) $("macro-toggle").checked = !!st.macro;
   if (st.bond && st.bond.id) bond = st.bond;
   updateBondUI();

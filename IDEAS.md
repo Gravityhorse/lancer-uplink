@@ -3,6 +3,18 @@
 Things that would make this tool genuinely great, roughly ordered by
 bang-for-buck.
 
+## Shipped in 2.2.0 ✓
+
+- ✓ RAW cone math (width = distance: 1/2/3…) on hex and square grids
+- ✓ Manual CRIT toggle in the dice tray (doubles dice, keep highest per pair)
+- ✓ Lancer-correct crits: any attack total 20+ (no special nat 20s)
+- ✓ NHP commentary on natural 1s
+- ✓ MOVE button cycles move → move+boost → off; weapon ◈ shows a red range field
+- ✓ Grid calibration controls: pointy/flat/square select, tile-size slider, FIT TO SCENE
+- ✓ Template preview/erase race conditions fixed (no more ghost blasts)
+- ✓ Holographic tray walls, glossier dice, close-up staging camera
+- ✓ Superheavy = Barrage (full action) with overrides for Autopod & friends
+
 ## Shipped in 2.1.0 ✓
 
 - ✓ Token bond (with follow-on-move)
