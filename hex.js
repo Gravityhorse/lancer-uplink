@@ -25,7 +25,15 @@ export const grid = {
   square: false,          // the mode actually in use
   modeOverride: null,     // null/"auto" | "hexp" | "hexf" | "square" (MAP tab)
   cellOverride: null,     // manual cell size in px (MAP tab slider), or null
+  nudge: { x: 0, y: 0 },  // manual lattice offset in px (MAP tab X/Y steppers)
 };
+
+// Manual X/Y lattice offset, layered on top of whatever the probe found —
+// survives recalibration so a hand-tuned alignment isn't lost.
+export function setNudge(x, y) {
+  grid.nudge.x = Number(x) || 0;
+  grid.nudge.y = Number(y) || 0;
+}
 
 function applyMode() {
   const o = grid.modeOverride;
@@ -123,7 +131,7 @@ export async function calibrate() {
 // grids q = column, r = row.
 
 export function hexToPixel(h) {
-  const o = grid.origin;
+  const o = { x: grid.origin.x + grid.nudge.x, y: grid.origin.y + grid.nudge.y };
   if (grid.square) {
     return { x: o.x + grid.S * h.q, y: o.y + grid.S * h.r };
   }
@@ -135,7 +143,7 @@ export function hexToPixel(h) {
 }
 
 export function pixelToHex(p) {
-  const x = p.x - grid.origin.x, y = p.y - grid.origin.y;
+  const x = p.x - grid.origin.x - grid.nudge.x, y = p.y - grid.origin.y - grid.nudge.y;
   if (grid.square) {
     return { q: Math.round(x / grid.S), r: Math.round(y / grid.S) };
   }
@@ -242,68 +250,22 @@ export function hexLine(origin, rad, n) {
   return out;
 }
 
-// CONE n — Lancer RAW: at every distance d from the origin the cone is
-// exactly d cells wide (1 / 2 / 3 / …), forming the triangle from the core
-// rulebook diagrams. We bucket candidate cells by distance and keep the d
-// cells closest to the aim direction at each step.
+// CONE n — a SOLID equilateral wedge: every cell within distance n whose
+// centre lies inside ±30° of the aim line (±45° on squares). Because hexes
+// interlock, this fills into the clean triangle from the rulebook art with
+// no holes. Aimed at a vertex it stays an isosceles triangle, hugging the
+// line as tightly as the lattice allows.
 export function hexCone(origin, rad, n) {
   const o = hexToPixel(origin);
-  const buckets = new Map(); // distance -> [{ h, a (|angle diff|), s (signed) }]
-  const limit = (grid.square ? Math.PI / 2 : Math.PI / 2) + 0.05; // never grab behind
-  for (const h of hexesInRange(origin, n, false)) {
-    const d = hexDistance(origin, h);
-    if (d < 1 || d > n) continue;
-    const p = hexToPixel(h);
-    let diff = Math.atan2(p.y - o.y, p.x - o.x) - rad;
-    while (diff > Math.PI) diff -= 2 * Math.PI;
-    while (diff < -Math.PI) diff += 2 * Math.PI;
-    if (Math.abs(diff) > limit) continue;
-    if (!buckets.has(d)) buckets.set(d, []);
-    buckets.get(d).push({ h, a: Math.abs(diff), s: diff });
-  }
+  const candidates = hexesInRange(origin, n, false);
+  const halfAngle = (grid.square ? Math.PI / 4 : Math.PI / 6) + 0.02;
   const out = [];
-  for (let d = 1; d <= n; d++) {
-    const row = buckets.get(d) || [];
-    out.push(...pickConeRow(row, d).map((x) => x.h));
+  for (const h of candidates) {
+    const p = hexToPixel(h);
+    const ang = Math.atan2(p.y - o.y, p.x - o.x);
+    let diff = Math.abs(ang - rad);
+    if (diff > Math.PI) diff = 2 * Math.PI - diff;
+    if (diff <= halfAngle && hexDistance(origin, h) <= n) out.push(h);
   }
   return out;
-}
-
-// Pick exactly d cells from a distance-row, SYMMETRIC about the aim line —
-// the rulebook triangle. Cells at mirrored angles (±x) form pair-groups; we
-// choose the subset of groups whose sizes sum to d with the smallest total
-// angular offset. Aimed along a hex edge this yields the canonical
-// 1 / ±pair / centre+±pair / … spread instead of a lopsided wedge.
-function pickConeRow(cells, d) {
-  if (!cells.length) return [];
-  const groups = [];
-  const byKey = new Map();
-  for (const c of cells) {
-    const key = Math.round(Math.abs(c.s) * 200); // ~0.005 rad buckets
-    let g = byKey.get(key);
-    if (!g) { g = { w: Math.abs(c.s), cells: [] }; byKey.set(key, g); groups.push(g); }
-    g.cells.push(c);
-  }
-  groups.sort((a, b) => a.w - b.w);
-
-  let best = null;
-  const search = (i, left, picked, weight) => {
-    if (left === 0) {
-      if (!best || weight < best.weight) best = { cells: picked.slice(), weight };
-      return;
-    }
-    if (i >= groups.length) return;
-    if (best && weight >= best.weight) return;
-    const g = groups[i];
-    if (g.cells.length <= left) {
-      picked.push(...g.cells);
-      search(i + 1, left - g.cells.length, picked, weight + g.w * g.cells.length);
-      picked.length -= g.cells.length;
-    }
-    search(i + 1, left, picked, weight);
-  };
-  search(0, Math.min(d, cells.length), [], 0);
-  if (best) return best.cells;
-  // no symmetric combination fits (vertex-aimed odd rows) — take the closest
-  return cells.slice().sort((a, b) => Math.abs(a.s) - Math.abs(b.s) || a.s - b.s).slice(0, d);
 }

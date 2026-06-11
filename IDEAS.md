@@ -3,6 +3,17 @@
 Things that would make this tool genuinely great, roughly ordered by
 bang-for-buck.
 
+## Shipped in 2.4.0 ✓
+
+- ✓ Cone restored to the solid filled triangle (the "symmetric rows" version
+  left a hole in the middle — interlocking wedge fill is the right shape)
+- ✓ Camera re-frames on every throw and dice land on-camera (no more staring
+  at empty floor on re-rolls)
+- ✓ Dice are numbers again (sigils retired); tick rings and HUD flicker removed
+- ✓ MISSION//CONTROL keeps DICE and MAP — only PILOT swaps to LANCERS telemetry
+- ✓ Grid offset X/Y nudge steppers (⅛-tile steps, persisted) for fine alignment
+- ✓ O.SHLD sits on the STRUCT/STRESS row — nothing wraps
+
 ## Shipped in 2.3.0 ✓
 
 - ✓ Grid calibration actually works (the SDK's grid API lives at

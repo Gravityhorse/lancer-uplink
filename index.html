@@ -223,8 +223,6 @@
       #vis-toggle.all { color: var(--good); }
 
       /* ---------- MISSION//CONTROL (GM) ---------- */
-      #gm-pane { display: none; padding: 10px 12px 16px; }
-      #gm-pane.active { display: block; }
       .gm-note { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-bottom: 10px; line-height: 1.5; }
       .lancer-card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--tech); margin-bottom: 8px; cursor: pointer; }
       .lancer-card .lc-head { display: flex; align-items: baseline; gap: 8px; padding: 8px 10px 4px; }
@@ -450,6 +448,14 @@
             </select>
             <label style="margin-top:10px">Tile size <span id="cell-size-val" style="color:var(--text);font-family:var(--mono)">150 px</span></label>
             <input id="cell-size" type="range" min="30" max="600" step="2" value="150" style="width:100%" />
+            <label style="margin-top:10px">Grid offset <span id="nudge-val" style="color:var(--text);font-family:var(--mono)">0, 0</span></label>
+            <div class="row">
+              <button id="nx-minus" class="btn ghost small" title="Shift the lattice left">◀ X</button>
+              <button id="nx-plus" class="btn ghost small" title="Shift the lattice right">X ▶</button>
+              <button id="ny-minus" class="btn ghost small" title="Shift the lattice up">▲ Y</button>
+              <button id="ny-plus" class="btn ghost small" title="Shift the lattice down">Y ▼</button>
+              <button id="n-reset" class="btn ghost small" title="Clear the manual offset">⟲</button>
+            </div>
             <button id="btn-fit" class="btn blue small" style="margin-top:8px;width:100%" title="Re-probe the scene's grid and match tile size & orientation to it">⌖ FIT TO SCENE</button>
           </div>
         </details>
@@ -462,13 +468,13 @@
           </div>
         </details>
       </section>
-    </main>
 
-    <!-- ====================== MISSION//CONTROL (GM) ====================== -->
-    <section id="gm-pane">
-      <div class="gm-note">LIVE SQUAD TELEMETRY — every player with their Uplink panel open reports in automatically. Click a lancer for full readout. Click the icon up top to return to pilot mode.</div>
-      <div id="squad"></div>
-    </section>
+      <!-- ================== MISSION//CONTROL: LANCERS (GM) ================== -->
+      <section id="tab-lancers" class="tabpane">
+        <div class="gm-note">LIVE SQUAD TELEMETRY — every player with their Uplink panel open reports in automatically. Click a lancer for full readout. Click the icon up top to return to pilot mode.</div>
+        <div id="squad"></div>
+      </section>
+    </main>
 
     <div id="tooltip">
       <div class="tt-head" id="tt-head"></div>

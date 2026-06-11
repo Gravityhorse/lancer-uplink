@@ -68,6 +68,7 @@ function saveState() {
         vis: tool.getTemplateVisibility(),
         gridMode: $("grid-mode")?.value || "auto",
         cellSize: hex.grid.cellOverride,
+        nudge: { ...hex.grid.nudge },
         macro: $("macro-toggle")?.checked || false,
         bond,
       }));
@@ -89,10 +90,11 @@ document.querySelectorAll("nav.tabs button").forEach((btn) => {
       t.classList.toggle("active", t.id === `tab-${tab}`)
     );
     if (tab === "dice") ensureDiceTray();
+    if (tab === "lancers") renderGM();
   });
 });
 const diceTabActive = () =>
-  document.getElementById("tab-dice")?.classList.contains("active") && !gmMode;
+  document.getElementById("tab-dice")?.classList.contains("active");
 
 function switchToDiceTab() {
   document.querySelector('nav.tabs button[data-tab="dice"]')?.click();
@@ -104,6 +106,8 @@ const squad = new Map(); // who -> last status payload
 
 $("hdr-icon")?.addEventListener("click", () => setGmMode(!gmMode));
 
+// MISSION//CONTROL keeps the DICE and MAP tabs — only the first tab swaps
+// between PILOT (player sheet) and LANCERS (live squad telemetry).
 function setGmMode(on) {
   gmMode = on;
   $("hdr-icon")?.classList.toggle("rot", on);
@@ -114,9 +118,15 @@ function setGmMode(on) {
       ? 'MISSION<span class="slash">//</span>CONTROL'
       : 'LANCER<span class="slash">//</span>UPLINK';
   }
-  $("player-main")?.classList.toggle("hidden", on);
-  $("tabnav")?.classList.toggle("hidden", on);
-  $("gm-pane")?.classList.toggle("active", on);
+  const firstBtn = document.querySelector(
+    'nav.tabs button[data-tab="pilot"], nav.tabs button[data-tab="lancers"]'
+  );
+  if (firstBtn) {
+    const wasActive = firstBtn.classList.contains("active");
+    firstBtn.dataset.tab = on ? "lancers" : "pilot";
+    firstBtn.textContent = on ? "LANCERS" : "PILOT";
+    if (wasActive) firstBtn.click(); // re-route to the new pane
+  }
   if (on) {
     renderGM();
     requestSquadStatus();
@@ -564,12 +574,12 @@ function renderCC(s) {
     `<div class="ccpips">
       <span>STRUCT <b>${"◆".repeat(live.structure)}${"◇".repeat(Math.max(0, s.structureMax - live.structure))}</b> ${pp("structure")}</span>
       <span>STRESS <b>${"◆".repeat(live.stress)}${"◇".repeat(Math.max(0, s.stressMax - live.stress))}</b> ${pp("stress")}</span>
+      <span>O.SHLD <b>${live.overshield}</b> ${pp("overshield")}</span>
     </div>
     <div class="ccpips">
       <span>EVA <b>${s.evasion}</b></span><span>E-DEF <b>${s.edef}</b></span>
       <span>ARMOR <b>${s.armor}</b></span><span>SAVE <b>${s.save}</b></span>
       <span>GRIT <b>+${s.attackBonus}</b></span>
-      <span>O.SHLD <b>${live.overshield}</b> ${pp("overshield")}</span>
     </div>`;
 
   // HP / Heat / Repair / Core steppers — with structure & stress automation
@@ -1472,6 +1482,27 @@ $("btn-fit")?.addEventListener("click", async () => {
   setStatus("Grid re-probed and matched to the scene.", "status-ok");
 });
 
+// manual lattice offset — each click shifts by ⅛ of a tile
+function refreshNudgeVal() {
+  const v = $("nudge-val");
+  if (v) v.textContent = `${Math.round(hex.grid.nudge.x)}, ${Math.round(hex.grid.nudge.y)} px`;
+}
+function nudgeBy(dx, dy) {
+  const step = Math.max(4, Math.round(hex.grid.dpi / 8));
+  hex.setNudge(hex.grid.nudge.x + dx * step, hex.grid.nudge.y + dy * step);
+  refreshNudgeVal();
+  saveState();
+}
+$("nx-minus")?.addEventListener("click", () => nudgeBy(-1, 0));
+$("nx-plus")?.addEventListener("click", () => nudgeBy(1, 0));
+$("ny-minus")?.addEventListener("click", () => nudgeBy(0, -1));
+$("ny-plus")?.addEventListener("click", () => nudgeBy(0, 1));
+$("n-reset")?.addEventListener("click", () => {
+  hex.setNudge(0, 0);
+  refreshNudgeVal();
+  saveState();
+});
+
 $("macro-toggle")?.addEventListener("change", saveState);
 
 function refreshGridReadout() {
@@ -1563,6 +1594,8 @@ async function start() {
   if ($("grid-mode")) $("grid-mode").value = mode;
   hex.setGridOverride(mode);
   if (st.cellSize) hex.setCellSize(st.cellSize);
+  if (st.nudge) hex.setNudge(st.nudge.x, st.nudge.y);
+  refreshNudgeVal();
   syncCellSlider();
   refreshGridReadout();
   if ($("macro-toggle")) $("macro-toggle").checked = !!st.macro;

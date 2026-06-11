@@ -221,80 +221,6 @@ function numberTexture(value, fg) {
   return tex;
 }
 
-// ---- faction sigils: the "20" face wears the manufacturer's mark --------------
-const sigilCache = new Map();
-function sigilTexture(schemeKey, fg) {
-  const key = `${schemeKey}|${fg}`;
-  if (sigilCache.has(key)) return sigilCache.get(key);
-  const s = 128;
-  const cv = document.createElement("canvas");
-  cv.width = cv.height = s;
-  const ctx = cv.getContext("2d");
-  ctx.clearRect(0, 0, s, s);
-  drawEngraving(ctx, s, fg);
-  ctx.save();
-  ctx.translate(s / 2, s / 2);
-  ctx.strokeStyle = fg;
-  ctx.fillStyle = fg;
-  ctx.lineWidth = 5;
-  ctx.lineJoin = "round";
-  ctx.shadowColor = "rgba(0,0,0,0.8)";
-  ctx.shadowBlur = 8;
-
-  if (schemeKey === "union") {
-    // Union: five-pointed star in a ring
-    ctx.beginPath(); ctx.arc(0, 0, 40, 0, Math.PI * 2); ctx.stroke();
-    ctx.beginPath();
-    for (let i = 0; i < 5; i++) {
-      const a = -Math.PI / 2 + (i * 4 * Math.PI) / 5;
-      const x = 28 * Math.cos(a), y = 28 * Math.sin(a);
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    }
-    ctx.closePath(); ctx.fill();
-  } else if (schemeKey === "ssc") {
-    // SSC: swallow in flight — two swept wing strokes
-    ctx.lineWidth = 7;
-    ctx.beginPath(); ctx.moveTo(-36, 10); ctx.quadraticCurveTo(-6, -34, 38, -22); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(-30, 28); ctx.quadraticCurveTo(2, -10, 38, -2); ctx.stroke();
-    ctx.beginPath(); ctx.arc(34, -12, 5, 0, Math.PI * 2); ctx.fill();
-  } else if (schemeKey === "horus") {
-    // HORUS: the eye
-    ctx.lineWidth = 6;
-    ctx.beginPath();
-    ctx.moveTo(-40, 0); ctx.quadraticCurveTo(0, -38, 40, 0); ctx.quadraticCurveTo(0, 38, -40, 0);
-    ctx.closePath(); ctx.stroke();
-    ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(0, 19); ctx.lineTo(0, 40); ctx.stroke(); // tear line
-  } else if (schemeKey === "ha") {
-    // Harrison Armory: stacked chevrons
-    ctx.lineWidth = 8;
-    for (const y of [-14, 4, 22]) {
-      ctx.beginPath(); ctx.moveTo(-30, y + 12); ctx.lineTo(0, y - 10); ctx.lineTo(30, y + 12); ctx.stroke();
-    }
-  } else if (schemeKey === "ips") {
-    // IPS-Northstar: anchor-star
-    ctx.lineWidth = 6;
-    ctx.beginPath(); ctx.arc(0, -24, 10, 0, Math.PI * 2); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(0, 30); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(-26, 12); ctx.quadraticCurveTo(0, 44, 26, 12); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(-14, -2); ctx.lineTo(14, -2); ctx.stroke();
-  } else {
-    // fallback: hexagon
-    ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const a = -Math.PI / 2 + (i * Math.PI) / 3;
-      const x = 34 * Math.cos(a), y = 34 * Math.sin(a);
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    }
-    ctx.closePath(); ctx.stroke();
-  }
-  ctx.restore();
-  const tex = new THREE.CanvasTexture(cv);
-  tex.anisotropy = 4;
-  sigilCache.set(key, tex);
-  return tex;
-}
-
 // ---- the tray controller -------------------------------------------------------
 export function createDiceTray(container, opts = {}) {
   const getSchemeKey = () => opts.scheme?.() || "union";
@@ -388,27 +314,7 @@ export function createDiceTray(container, opts = {}) {
   scene.add(floor);
 
   // ---- animated deco (updated each frame in the loop) -------------------------
-  const deco = { rings: [], dust: null, panelMat: null, railMat: null, holoMat: null, t: 0 };
-
-  // landing-pad tick rings: two counter-rotating circles of glowing dashes
-  function tickRing(radius, count, size, color, opacity) {
-    const g = new THREE.Group();
-    const mat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity,
-      blending: THREE.AdditiveBlending, depthWrite: false,
-    });
-    for (let i = 0; i < count; i++) {
-      const a = (i / count) * Math.PI * 2;
-      const tick = new THREE.Mesh(new THREE.BoxGeometry(size, 0.02, 0.07), mat);
-      tick.position.set(radius * Math.cos(a), 0.03, radius * Math.sin(a));
-      tick.rotation.y = -a + Math.PI / 2;
-      g.add(tick);
-    }
-    scene.add(g);
-    return g;
-  }
-  deco.rings.push(tickRing(2.9, 36, 0.34, 0x57d8ff, 0.5));
-  deco.rings.push(tickRing(4.3, 18, 0.8, 0x2f9fc4, 0.3));
+  const deco = { dust: null, panelMat: null, railMat: null, t: 0 };
 
   // drifting dust motes — slow upward sparkle
   {
@@ -482,11 +388,12 @@ export function createDiceTray(container, opts = {}) {
     hctx.font = "14px monospace";
     hctx.fillText("UNION OMNINET ▮▮▮▯▯ LINK STABLE", 290, 38);
     const hudTex = new THREE.CanvasTexture(hud);
-    deco.holoMat = new THREE.MeshBasicMaterial({
+    // steady glow — no flicker
+    const holoMat = new THREE.MeshBasicMaterial({
       map: hudTex, transparent: true, opacity: 0.7,
       blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
     });
-    const strip = new THREE.Mesh(new THREE.PlaneGeometry(TRAY * 1.5, TRAY * 1.5 / 8), deco.holoMat);
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(TRAY * 1.5, TRAY * 1.5 / 8), holoMat);
     strip.position.set(0, 1.05, -TRAY + 0.06);
     scene.add(strip);
   }
@@ -550,10 +457,7 @@ export function createDiceTray(container, opts = {}) {
 
     faces.forEach((f, i) => {
       const disp = type === "d10" ? (values[i] === 0 ? 10 : values[i]) : values[i];
-      // the 20 face carries the manufacturer's sigil instead of a number
-      const tex = (type === "d20" && disp === 20 && role === "normal")
-        ? sigilTexture(getSchemeKey(), c.num)
-        : numberTexture(disp, c.num);
+      const tex = numberTexture(disp, c.num);
       const size = type === "d6" ? 0.8 : type === "d20" ? 0.62 : 0.7;
       const plane = new THREE.Mesh(
         new THREE.PlaneGeometry(size, size),
@@ -676,14 +580,21 @@ export function createDiceTray(container, opts = {}) {
     return new Promise((resolve) => {
       if (rolling || !list.length) { resolve(null); return; }
       rolling = true;
-      // the camera STAYS at the staging close-up through the throw — it only
-      // moves again when the result zoom kicks in
+      // re-frame on the action EVERY throw (fixes the "staring at empty
+      // space" re-roll bug — the camera was still aimed at the last landing
+      // spot). The throw is tuned to land inside this framing.
+      stageView();
       stage(list);
       list.forEach((die) => {
         die.staged = false;
         const s = 6 + 6 * power;
         die.body.wakeUp();
-        die.body.velocity.set((Math.random() - 0.5) * s, 2 + Math.random() * 2, -(2 + Math.random() * s));
+        // converge toward the tray centre so the dice stay on-camera
+        die.body.velocity.set(
+          (Math.random() - 0.5) * s * 0.7,
+          2 + Math.random() * 2,
+          -(1.5 + Math.random() * 3.5)
+        );
         die.body.angularVelocity.set(
           (Math.random() - 0.5) * 18, (Math.random() - 0.5) * 18, (Math.random() - 0.5) * 18
         );
@@ -781,9 +692,10 @@ export function createDiceTray(container, opts = {}) {
 
   function resetCamera() { tweenCam(CAM_HOME, LOOK_HOME, 0.5); }
 
-  // Close-up on the staged (hovering) dice so they look big in the hand.
+  // Close-up that frames BOTH the hovering dice and the landing zone, so the
+  // whole throw plays out on camera.
   function stageView() {
-    tweenCam(new THREE.Vector3(0, 11.5, 11.5), new THREE.Vector3(0, HOVER_Y - 0.8, 2.0), 0.55);
+    tweenCam(new THREE.Vector3(0, 12.5, 12.0), new THREE.Vector3(0, 1.6, 0.6), 0.55);
   }
 
   // ---- render + physics loop ----------------------------------------------------
@@ -854,14 +766,8 @@ export function createDiceTray(container, opts = {}) {
 
     // ---- ambient deco animation -------------------------------------------
     deco.t += dt;
-    deco.rings[0].rotation.y += dt * 0.25;
-    deco.rings[1].rotation.y -= dt * 0.12;
     if (deco.panelMat) deco.panelMat.opacity = 0.10 + 0.05 * (1 + Math.sin(deco.t * 1.4)) / 2;
     if (deco.railMat) deco.railMat.opacity = 0.5 + 0.18 * Math.sin(deco.t * 2.1);
-    if (deco.holoMat) {
-      // occasional holo flicker
-      deco.holoMat.opacity = Math.random() < 0.03 ? 0.25 + Math.random() * 0.3 : 0.7;
-    }
     if (deco.dust) {
       const pos = deco.dust.geometry.getAttribute("position");
       for (let i = 0; i < pos.count; i++) {
