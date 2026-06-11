@@ -138,3 +138,15 @@ export async function renderTerrain(keys, keyToHex) {
 
   return item;
 }
+
+// Deletes only the calling player's placed templates (used by the popover's
+// "Clear my templates" button). Terrain and other players' items are untouched.
+export async function clearMyTemplates() {
+  const me = await OBR.player.getId();
+  const items = await OBR.scene.items.getItems(
+    (i) => i.metadata?.[META]?.kind === "template" && i.createdUserId === me
+  );
+  if (items.length) {
+    await OBR.scene.items.deleteItems(items.map((i) => i.id));
+  }
+}

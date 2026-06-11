@@ -2,56 +2,130 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Lancer Uplink</title>
     <style>
-      body {
-        margin: 0;
-        padding: 12px;
-        font-family: Arial, sans-serif;
-        background: #1f1f1f;
-        color: white;
+      :root {
+        --bg: #14171c; --panel: #1d2127; --panel-2: #232832; --line: #2e3540;
+        --text: #e6e9ee; --muted: #9aa4b2; --accent: #d22f3d; --accent-2: #ffb454; --good: #5ad17a;
       }
-
-      h1 {
-        font-size: 18px;
-        margin: 0 0 12px;
-      }
-
-      label {
-        display: block;
-        margin-top: 12px;
-        font-size: 13px;
-      }
-
-      input {
-        width: 100%;
-        margin-top: 4px;
-        box-sizing: border-box;
-      }
-
-      #status {
-        margin-top: 14px;
-        font-size: 13px;
-        color: #cccccc;
-      }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: "Segoe UI", Roboto, Arial, sans-serif; background: var(--bg); color: var(--text); font-size: 13px; }
+      header { padding: 10px 12px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+      header img { width: 20px; height: 20px; }
+      header h1 { font-size: 14px; letter-spacing: 2px; margin: 0; font-weight: 700; }
+      header h1 .slash { color: var(--accent); }
+      nav { display: flex; border-bottom: 1px solid var(--line); background: var(--panel); }
+      nav button { flex: 1; background: none; border: none; color: var(--muted); padding: 9px 4px; font-size: 12px; letter-spacing: 1px; cursor: pointer; border-bottom: 2px solid transparent; }
+      nav button.active { color: var(--text); border-bottom-color: var(--accent); }
+      main { padding: 12px; }
+      .tab { display: none; } .tab.active { display: block; }
+      h2 { font-size: 11px; letter-spacing: 1.5px; color: var(--muted); text-transform: uppercase; margin: 0 0 8px; }
+      label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+      input[type="number"], input[type="text"], select { width: 100%; background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 4px; padding: 6px 8px; font-size: 13px; }
+      input[type="color"] { width: 100%; height: 32px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 2px; }
+      .btn { display: inline-block; background: var(--accent); color: #fff; border: none; border-radius: 4px; padding: 8px 12px; font-size: 12px; letter-spacing: 1px; cursor: pointer; text-align: center; }
+      .btn.ghost { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); }
+      .btn.small { padding: 4px 8px; font-size: 11px; }
+      .btn:hover { filter: brightness(1.1); }
+      .filebtn { display: block; text-align: center; cursor: pointer; border: 1px dashed var(--line); border-radius: 6px; padding: 16px; color: var(--muted); background: var(--panel); }
+      .filebtn:hover { border-color: var(--accent); color: var(--text); }
+      .filebtn input { display: none; }
+      #status { margin-top: 10px; font-size: 12px; color: var(--muted); min-height: 16px; }
+      .status-ok { color: var(--good) !important; }
+      .status-err { color: var(--accent) !important; }
+      .mech-head { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px; margin-bottom: 10px; }
+      .mech-head .name { font-size: 15px; font-weight: 700; }
+      .mech-head .frame { color: var(--accent-2); font-size: 12px; letter-spacing: 1px; }
+      .mech-head .pilot { color: var(--muted); font-size: 11px; margin-top: 2px; }
+      .statgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 12px; }
+      .stat { background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 6px; text-align: center; }
+      .stat .v { font-size: 16px; font-weight: 700; }
+      .stat .k { font-size: 9px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+      .weapon, .system { background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 8px; margin-bottom: 6px; }
+      .weapon .top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+      .weapon .wname { font-weight: 600; }
+      .weapon .meta { color: var(--muted); font-size: 11px; margin-top: 3px; }
+      .weapon .tags { color: var(--accent-2); font-size: 10px; letter-spacing: 1px; margin-top: 2px; }
+      .mount-label { font-size: 10px; color: var(--muted); letter-spacing: 1.5px; margin: 10px 0 4px; }
+      .sys-wrap { display: flex; flex-wrap: wrap; gap: 4px; }
+      .system { padding: 4px 8px; font-size: 11px; margin: 0; }
+      .row { display: flex; gap: 8px; } .row > * { flex: 1; }
+      .muted { color: var(--muted); font-size: 11px; }
+      .hidden { display: none; }
+      #rolllog { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; max-height: 220px; overflow-y: auto; }
+      .roll { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; font-size: 12px; }
+      .roll.dmg { border-left-color: var(--accent-2); }
+      .roll.remote { border-left-color: var(--muted); }
+      .roll .who { color: var(--muted); font-size: 10px; letter-spacing: 1px; }
+      .roll .big { font-size: 15px; font-weight: 700; }
+      .roll .detail { color: var(--muted); font-size: 11px; }
+      .crit { color: var(--accent-2); }
     </style>
   </head>
-
   <body>
-    <h1>Lancer Uplink</h1>
-
-    <label>
-      Template Size
-      <input id="size" type="number" min="1" max="20" value="3" />
-    </label>
-
-    <label>
-      Template Color
-      <input id="color" type="color" value="#d22f3d" />
-    </label>
-
-    <p id="status">Loading extension...</p>
-
-    <script type="module" src="./main.js?v=10"></script>
+    <header>
+      <img src="./logo.svg" alt="" onerror="this.style.display='none'" />
+      <h1>LANCER<span class="slash">//</span>UPLINK</h1>
+    </header>
+    <nav>
+      <button data-tab="pilot" class="active">PILOT</button>
+      <button data-tab="dice">DICE</button>
+      <button data-tab="templates">TEMPLATES</button>
+    </nav>
+    <main>
+      <section id="tab-pilot" class="tab active">
+        <h2>Import COMP/CON Pilot</h2>
+        <label class="filebtn">
+          Click to upload a COMP/CON pilot export (.json)
+          <input id="pilotfile" type="file" accept=".json,application/json" />
+        </label>
+        <p class="muted" style="margin-top:6px">In COMP/CON: <b>Pilot Roster → Export → Download pilot as JSON</b>.</p>
+        <div id="mechpicker" class="hidden">
+          <label>Active mech</label>
+          <select id="mechselect"></select>
+        </div>
+        <div id="sheet" class="hidden">
+          <div class="mech-head">
+            <div class="name" id="m-name"></div>
+            <div class="frame" id="m-frame"></div>
+            <div class="pilot" id="m-pilot"></div>
+          </div>
+          <div class="statgrid" id="statgrid"></div>
+          <div id="mounts"></div>
+          <h2 style="margin-top:12px">Systems</h2>
+          <div class="sys-wrap" id="systems"></div>
+        </div>
+        <p id="status">Booting…</p>
+      </section>
+      <section id="tab-dice" class="tab">
+        <h2>Attack Roll</h2>
+        <div class="row">
+          <div><label>Accuracy (+) / Difficulty (−)</label><input id="acc" type="number" value="0" step="1" /></div>
+          <div><label>Flat bonus (grit/etc.)</label><input id="flat" type="number" value="0" step="1" /></div>
+        </div>
+        <button id="rollatk" class="btn" style="width:100%;margin-top:10px">ROLL ATTACK (1d20)</button>
+        <h2 style="margin-top:16px">Damage Roll</h2>
+        <div class="row">
+          <div><label>Dice (e.g. 2d6, 1d3+1d6)</label><input id="dmgdice" type="text" value="2d6" /></div>
+          <div><label>Flat</label><input id="dmgflat" type="number" value="0" step="1" /></div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:8px">
+          <input id="overkill" type="checkbox" style="width:auto" /> Overkill
+        </label>
+        <button id="rolldmg" class="btn ghost" style="width:100%;margin-top:8px">ROLL DAMAGE</button>
+        <div id="rolllog"></div>
+      </section>
+      <section id="tab-templates" class="tab">
+        <h2>Template Tool</h2>
+        <p class="muted">Use the <b>LANCER Templates</b> tool in Owlbear's left toolbar to place Blast / Cone / Line templates and paint difficult terrain. Configure size &amp; colour here.</p>
+        <label>Template size (spaces)</label>
+        <input id="size" type="number" min="1" max="20" value="3" />
+        <label>Template colour</label>
+        <input id="color" type="color" value="#d22f3d" />
+        <button id="clearmine" class="btn ghost small" style="margin-top:12px">Clear my templates</button>
+      </section>
+    </main>
+    <script type="module" src="./main.js"></script>
   </body>
 </html>

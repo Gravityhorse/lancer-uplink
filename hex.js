@@ -1,6 +1,6 @@
 // hex.js — cube-coordinate hex math, self-calibrated against the live Owlbear grid.
 
-import { OBR } from "./sdk.js?v=10";
+import { OBR } from "./sdk.js";
 
 const SQRT3 = Math.sqrt(3);
 
