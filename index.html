@@ -27,7 +27,14 @@
       .btn { display: inline-block; background: var(--accent); color: #fff; border: none; border-radius: 4px; padding: 8px 12px; font-size: 12px; letter-spacing: 1px; cursor: pointer; text-align: center; }
       .btn.ghost { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); }
       .btn.small { padding: 4px 8px; font-size: 11px; }
+      .btn.green { background: #2f7d49; }
+      .btn.blue { background: #2f6bbd; }
+      .btn.red { background: var(--accent); }
       .btn:hover { filter: brightness(1.1); }
+      .rangetools { display: flex; gap: 6px; margin: 0 0 12px; }
+      .rangetools .btn { flex: 1; }
+      .tmpl-note { color: var(--muted); font-size: 10px; line-height: 1.4; margin: 0 0 10px; border-left: 2px solid var(--line); padding-left: 8px; }
+      .weapon .top .btn.tmpl { background: var(--accent); color:#fff; }
       .filebtn { display: block; text-align: center; cursor: pointer; border: 1px dashed var(--line); border-radius: 6px; padding: 16px; color: var(--muted); background: var(--panel); }
       .filebtn:hover { border-color: var(--accent); color: var(--text); }
       .filebtn input { display: none; }
@@ -61,26 +68,45 @@
       .roll .big { font-size: 15px; font-weight: 700; }
       .roll .detail { color: var(--muted); font-size: 11px; }
       .crit { color: var(--accent-2); }
+      .dice-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+      .scheme-sel { width: auto; max-width: 60%; font-size: 11px; padding: 4px 6px; }
+      .dicetray { width: 100%; height: 280px; background: radial-gradient(ellipse at 50% 30%, #1b2230 0%, #0e1014 100%); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+      .dice-picker { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; margin-top: 8px; }
+      .die-btn { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 8px 0; font-size: 12px; font-weight: 700; cursor: pointer; letter-spacing: 0.5px; }
+      .die-btn:hover { border-color: var(--accent); color: #fff; }
+      .die-btn:active { transform: translateY(1px); }
+      .adv-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+      .advcount { margin-left: auto; font-size: 11px; }
+      .dice-opts { display: flex; gap: 14px; margin-top: 8px; }
+      .chk { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); margin: 0; }
+      .quickroll { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 6px; }
+      .quickroll summary { cursor: pointer; font-size: 11px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+      .roll.private { border-left-color: var(--accent-2); opacity: 0.92; }
+      .roll .private-badge { color: var(--accent-2); font-size: 9px; letter-spacing: 1px; }
     </style>
   </head>
   <body>
     <header>
       <img src="./logo.svg" alt="" onerror="this.style.display='none'" />
       <h1>LANCER<span class="slash">//</span>UPLINK</h1>
+      <button id="clearmine" class="btn ghost small" style="margin-left:auto" title="Delete the templates you placed">Clear Templates</button>
     </header>
     <nav>
       <button data-tab="pilot" class="active">PILOT</button>
       <button data-tab="dice">DICE</button>
-      <button data-tab="templates">TEMPLATES</button>
     </nav>
     <main>
       <section id="tab-pilot" class="tab active">
         <h2>Import COMP/CON Pilot</h2>
         <label class="filebtn">
-          Click to upload a COMP/CON pilot export (.json)
+          Click to upload a COMP/CON pilot or roster export (.json)
           <input id="pilotfile" type="file" accept=".json,application/json" />
         </label>
-        <p class="muted" style="margin-top:6px">In COMP/CON: <b>Pilot Roster → Export → Download pilot as JSON</b>.</p>
+        <p class="muted" style="margin-top:6px">In COMP/CON: <b>Pilot Roster → Export → Download pilot as JSON</b>. Roster files with multiple pilots work too — you'll get a picker.</p>
+        <div id="pilotpicker" class="hidden">
+          <label>Pilot</label>
+          <select id="pilotselect"></select>
+        </div>
         <div id="mechpicker" class="hidden">
           <label>Active mech</label>
           <select id="mechselect"></select>
@@ -92,6 +118,8 @@
             <div class="pilot" id="m-pilot"></div>
           </div>
           <div class="statgrid" id="statgrid"></div>
+          <div class="rangetools" id="rangetools"></div>
+          <p class="tmpl-note">Templates use the <b>LANCER</b> tool in Owlbear's toolbar. Click to set the origin, then drag out to size &amp; aim — like native measuring. <span style="color:#5ad17a">Green</span> = movement, <span style="color:#3da5ff">blue</span> = tech/sensors, <span style="color:#d22f3d">red</span> = weapons. A weapon's <b>◈</b> button auto-arms its red template at the right size — just click the map to drop it.</p>
           <div id="mounts"></div>
           <h2 style="margin-top:12px">Systems</h2>
           <div class="sys-wrap" id="systems"></div>
@@ -99,31 +127,58 @@
         <p id="status">Booting…</p>
       </section>
       <section id="tab-dice" class="tab">
-        <h2>Attack Roll</h2>
-        <div class="row">
-          <div><label>Accuracy (+) / Difficulty (−)</label><input id="acc" type="number" value="0" step="1" /></div>
-          <div><label>Flat bonus (grit/etc.)</label><input id="flat" type="number" value="0" step="1" /></div>
+        <div class="dice-head">
+          <h2 style="margin:0">3D Dice Tray</h2>
+          <select id="scheme" class="scheme-sel" title="Dice colour scheme"></select>
         </div>
-        <button id="rollatk" class="btn" style="width:100%;margin-top:10px">ROLL ATTACK (1d20)</button>
-        <h2 style="margin-top:16px">Damage Roll</h2>
-        <div class="row">
-          <div><label>Dice (e.g. 2d6, 1d3+1d6)</label><input id="dmgdice" type="text" value="2d6" /></div>
-          <div><label>Flat</label><input id="dmgflat" type="number" value="0" step="1" /></div>
+        <div id="dicetray" class="dicetray"></div>
+        <div id="trayfallback" class="muted hidden" style="margin:6px 0">3D dice need an internet connection to load. Use the quick-roll below.</div>
+
+        <div class="dice-picker" id="dicepicker">
+          <button class="die-btn" data-die="d4">d4</button>
+          <button class="die-btn" data-die="d6">d6</button>
+          <button class="die-btn" data-die="d8">d8</button>
+          <button class="die-btn" data-die="d10">d10</button>
+          <button class="die-btn" data-die="d12">d12</button>
+          <button class="die-btn" data-die="d20">d20</button>
         </div>
-        <label style="display:flex;align-items:center;gap:6px;margin-top:8px">
-          <input id="overkill" type="checkbox" style="width:auto" /> Overkill
-        </label>
-        <button id="rolldmg" class="btn ghost" style="width:100%;margin-top:8px">ROLL DAMAGE</button>
+
+        <div class="adv-row">
+          <button id="addadv" class="btn small green" title="Add an Accuracy d6">+ Accuracy</button>
+          <button id="adddis" class="btn small red" title="Add a Difficulty d6">+ Difficulty</button>
+          <span id="advcount" class="advcount muted">0 dice queued</span>
+        </div>
+
+        <div class="dice-opts">
+          <label class="chk"><input id="keephigh" type="checkbox" style="width:auto" /> Keep highest (D&amp;D adv.)</label>
+          <label class="chk"><input id="hideroll" type="checkbox" style="width:auto" /> Hide roll (GM)</label>
+        </div>
+
+        <div class="row" style="margin-top:8px">
+          <button id="rolldice" class="btn red" style="flex:2">ROLL</button>
+          <button id="cleardice" class="btn ghost" style="flex:1">Clear</button>
+        </div>
+
+        <details class="quickroll">
+          <summary>Manual / quick roll</summary>
+          <h2 style="margin-top:10px">Attack Roll</h2>
+          <div class="row">
+            <div><label>Accuracy (+) / Difficulty (−)</label><input id="acc" type="number" value="0" step="1" /></div>
+            <div><label>Flat bonus (grit/etc.)</label><input id="flat" type="number" value="0" step="1" /></div>
+          </div>
+          <button id="rollatk" class="btn" style="width:100%;margin-top:10px">ROLL ATTACK (1d20)</button>
+          <h2 style="margin-top:16px">Damage Roll</h2>
+          <div class="row">
+            <div><label>Dice (e.g. 2d6, 1d3+1d6)</label><input id="dmgdice" type="text" value="2d6" /></div>
+            <div><label>Flat</label><input id="dmgflat" type="number" value="0" step="1" /></div>
+          </div>
+          <label style="display:flex;align-items:center;gap:6px;margin-top:8px">
+            <input id="overkill" type="checkbox" style="width:auto" /> Overkill
+          </label>
+          <button id="rolldmg" class="btn ghost" style="width:100%;margin-top:8px">ROLL DAMAGE</button>
+        </details>
+
         <div id="rolllog"></div>
-      </section>
-      <section id="tab-templates" class="tab">
-        <h2>Template Tool</h2>
-        <p class="muted">Use the <b>LANCER Templates</b> tool in Owlbear's left toolbar to place Blast / Cone / Line templates and paint difficult terrain. Configure size &amp; colour here.</p>
-        <label>Template size (spaces)</label>
-        <input id="size" type="number" min="1" max="20" value="3" />
-        <label>Template colour</label>
-        <input id="color" type="color" value="#d22f3d" />
-        <button id="clearmine" class="btn ghost small" style="margin-top:12px">Clear my templates</button>
       </section>
     </main>
     <script type="module" src="./main.js"></script>
