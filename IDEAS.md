@@ -3,6 +3,19 @@
 Things that would make this tool genuinely great, roughly ordered by
 bang-for-buck.
 
+## Shipped in 2.3.0 ✓
+
+- ✓ Grid calibration actually works (the SDK's grid API lives at
+  `OBR.scene.grid`, not `OBR.grid` — every probe was silently throwing,
+  which caused both the snap offset and the FIT TO SCENE failure)
+- ✓ Cone rows are now symmetric rulebook triangles (pair-group selection)
+- ✓ Faction sigil replaces the 20 on d20s; engraved frames on every face;
+  saturation boosted
+- ✓ Camera stays in the staging close-up through the throw, then zooms the result
+- ✓ Tray dressed up: hex-etched glowing deck, counter-rotating landing-pad
+  tick rings, drifting dust motes, pulsing field walls, flickering holo HUD strip
+- ✓ NAT 1 label removed (the NHP's commentary stands alone)
+
 ## Shipped in 2.2.0 ✓
 
 - ✓ RAW cone math (width = distance: 1/2/3…) on hex and square grids

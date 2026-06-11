@@ -117,12 +117,12 @@ function techTexture(baseColor, traceColor) {
   ctx.fillStyle = baseColor;
   ctx.fillRect(0, 0, s, s);
   ctx.globalCompositeOperation = "saturation";
-  ctx.fillStyle = "hsl(0, 65%, 50%)"; // push saturation up
+  ctx.fillStyle = "hsl(0, 84%, 50%)"; // push saturation hard — these should POP
   ctx.fillRect(0, 0, s, s);
   ctx.globalCompositeOperation = "source-over";
   const rg = ctx.createRadialGradient(s / 2, s / 2, s * 0.1, s / 2, s / 2, s * 0.75);
-  rg.addColorStop(0, "rgba(255,255,255,0.14)");
-  rg.addColorStop(1, "rgba(0,0,0,0.16)");
+  rg.addColorStop(0, "rgba(255,255,255,0.18)");
+  rg.addColorStop(1, "rgba(0,0,0,0.14)");
   ctx.fillStyle = rg;
   ctx.fillRect(0, 0, s, s);
 
@@ -172,6 +172,28 @@ function techTexture(baseColor, traceColor) {
 }
 
 // ---- number-label texture cache ----------------------------------------------
+// Every face gets a faint "engraved" frame — twin arcs + corner ticks — so the
+// dice read as machined hardware even up close.
+function drawEngraving(ctx, s, fg) {
+  ctx.save();
+  ctx.strokeStyle = fg;
+  ctx.globalAlpha = 0.28;
+  ctx.lineWidth = 2;
+  // twin arcs top & bottom
+  ctx.beginPath(); ctx.arc(s / 2, s / 2, s * 0.42, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
+  ctx.beginPath(); ctx.arc(s / 2, s / 2, s * 0.42, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
+  // corner ticks
+  const t = s * 0.08;
+  for (const [cx, cy, dx, dy] of [[t, t, 1, 1], [s - t, t, -1, 1], [t, s - t, 1, -1], [s - t, s - t, -1, -1]]) {
+    ctx.beginPath();
+    ctx.moveTo(cx + dx * t, cy);
+    ctx.lineTo(cx, cy);
+    ctx.lineTo(cx, cy + dy * t);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 const numTexCache = new Map();
 function numberTexture(value, fg) {
   const key = `${value}|${fg}`;
@@ -181,6 +203,7 @@ function numberTexture(value, fg) {
   cv.width = cv.height = s;
   const ctx = cv.getContext("2d");
   ctx.clearRect(0, 0, s, s);
+  drawEngraving(ctx, s, fg);
   // soft dark halo behind the glyph so white numbers pop on light faces too
   ctx.shadowColor = "rgba(0,0,0,0.85)";
   ctx.shadowBlur = 10;
@@ -198,9 +221,84 @@ function numberTexture(value, fg) {
   return tex;
 }
 
+// ---- faction sigils: the "20" face wears the manufacturer's mark --------------
+const sigilCache = new Map();
+function sigilTexture(schemeKey, fg) {
+  const key = `${schemeKey}|${fg}`;
+  if (sigilCache.has(key)) return sigilCache.get(key);
+  const s = 128;
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = s;
+  const ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, s, s);
+  drawEngraving(ctx, s, fg);
+  ctx.save();
+  ctx.translate(s / 2, s / 2);
+  ctx.strokeStyle = fg;
+  ctx.fillStyle = fg;
+  ctx.lineWidth = 5;
+  ctx.lineJoin = "round";
+  ctx.shadowColor = "rgba(0,0,0,0.8)";
+  ctx.shadowBlur = 8;
+
+  if (schemeKey === "union") {
+    // Union: five-pointed star in a ring
+    ctx.beginPath(); ctx.arc(0, 0, 40, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath();
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + (i * 4 * Math.PI) / 5;
+      const x = 28 * Math.cos(a), y = 28 * Math.sin(a);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.closePath(); ctx.fill();
+  } else if (schemeKey === "ssc") {
+    // SSC: swallow in flight — two swept wing strokes
+    ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(-36, 10); ctx.quadraticCurveTo(-6, -34, 38, -22); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-30, 28); ctx.quadraticCurveTo(2, -10, 38, -2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(34, -12, 5, 0, Math.PI * 2); ctx.fill();
+  } else if (schemeKey === "horus") {
+    // HORUS: the eye
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(-40, 0); ctx.quadraticCurveTo(0, -38, 40, 0); ctx.quadraticCurveTo(0, 38, -40, 0);
+    ctx.closePath(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0, 19); ctx.lineTo(0, 40); ctx.stroke(); // tear line
+  } else if (schemeKey === "ha") {
+    // Harrison Armory: stacked chevrons
+    ctx.lineWidth = 8;
+    for (const y of [-14, 4, 22]) {
+      ctx.beginPath(); ctx.moveTo(-30, y + 12); ctx.lineTo(0, y - 10); ctx.lineTo(30, y + 12); ctx.stroke();
+    }
+  } else if (schemeKey === "ips") {
+    // IPS-Northstar: anchor-star
+    ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.arc(0, -24, 10, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(0, 30); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-26, 12); ctx.quadraticCurveTo(0, 44, 26, 12); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-14, -2); ctx.lineTo(14, -2); ctx.stroke();
+  } else {
+    // fallback: hexagon
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const a = -Math.PI / 2 + (i * Math.PI) / 3;
+      const x = 34 * Math.cos(a), y = 34 * Math.sin(a);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.closePath(); ctx.stroke();
+  }
+  ctx.restore();
+  const tex = new THREE.CanvasTexture(cv);
+  tex.anisotropy = 4;
+  sigilCache.set(key, tex);
+  return tex;
+}
+
 // ---- the tray controller -------------------------------------------------------
 export function createDiceTray(container, opts = {}) {
-  const getScheme = () => SCHEMES[opts.scheme?.() || "union"] || SCHEMES.union;
+  const getSchemeKey = () => opts.scheme?.() || "union";
+  const getScheme = () => SCHEMES[getSchemeKey()] || SCHEMES.union;
 
   const W = container.clientWidth || 360;
   const H = opts.height || 300;
@@ -230,36 +328,125 @@ export function createDiceTray(container, opts = {}) {
   key.shadow.mapSize.set(1024, 1024);
   scene.add(key);
 
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0x14161c, roughness: 0.95, metalness: 0.0 });
+  // ---- hangar-deck floor: hex-etched plating with a soft emissive glow -------
+  function hexFloorTexture() {
+    const s = 512;
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = s;
+    const ctx = cv.getContext("2d");
+    ctx.fillStyle = "#12151c";
+    ctx.fillRect(0, 0, s, s);
+    // radial deck glow under the landing zone
+    const rg = ctx.createRadialGradient(s / 2, s / 2, 20, s / 2, s / 2, s * 0.55);
+    rg.addColorStop(0, "rgba(40,120,160,0.30)");
+    rg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = rg;
+    ctx.fillRect(0, 0, s, s);
+    // etched hex plating
+    ctx.strokeStyle = "rgba(90, 180, 220, 0.20)";
+    ctx.lineWidth = 1.5;
+    const r = 34, h = r * Math.sqrt(3) / 2;
+    for (let row = -1; row * h * 1 < s + r; row++) {
+      for (let col = -1; col * 1.5 * r < s + r; col++) {
+        const cx = col * 1.5 * r;
+        const cy = row * 2 * h + (col % 2 ? h : 0);
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+          const a = (i * Math.PI) / 3;
+          const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
+          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+    }
+    // a few "live" hexes lit brighter, like status cells
+    ctx.fillStyle = "rgba(80, 200, 255, 0.10)";
+    for (let k = 0; k < 7; k++) {
+      const cx = Math.random() * s, cy = Math.random() * s;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (i * Math.PI) / 3;
+        i === 0 ? ctx.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a)) : ctx.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a));
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.anisotropy = 4;
+    return tex;
+  }
+  const floorTex = hexFloorTexture();
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff, map: floorTex,
+    emissive: 0x2bb7e0, emissiveMap: floorTex, emissiveIntensity: 0.22,
+    roughness: 0.9, metalness: 0.1,
+  });
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(TRAY * 2, TRAY * 2), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
-  const grid = new THREE.GridHelper(TRAY * 2, 12, 0x3a4a66, 0x232832);
-  grid.position.y = 0.01;
-  scene.add(grid);
 
-  // ---- holographic boundary walls -------------------------------------------
-  // Translucent cyan panels with a bright emissive rail along the top edge —
-  // simple sci-fi containment-field look.
+  // ---- animated deco (updated each frame in the loop) -------------------------
+  const deco = { rings: [], dust: null, panelMat: null, railMat: null, holoMat: null, t: 0 };
+
+  // landing-pad tick rings: two counter-rotating circles of glowing dashes
+  function tickRing(radius, count, size, color, opacity) {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      const tick = new THREE.Mesh(new THREE.BoxGeometry(size, 0.02, 0.07), mat);
+      tick.position.set(radius * Math.cos(a), 0.03, radius * Math.sin(a));
+      tick.rotation.y = -a + Math.PI / 2;
+      g.add(tick);
+    }
+    scene.add(g);
+    return g;
+  }
+  deco.rings.push(tickRing(2.9, 36, 0.34, 0x57d8ff, 0.5));
+  deco.rings.push(tickRing(4.3, 18, 0.8, 0x2f9fc4, 0.3));
+
+  // drifting dust motes — slow upward sparkle
+  {
+    const N = 70;
+    const pos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * TRAY * 1.9;
+      pos[i * 3 + 1] = Math.random() * 5;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * TRAY * 1.9;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    deco.dust = new THREE.Points(geo, new THREE.PointsMaterial({
+      color: 0x8fdcff, size: 0.07, transparent: true, opacity: 0.55,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    scene.add(deco.dust);
+  }
+
+  // ---- holographic boundary walls with pulsing field + HUD strip --------------
   {
     const wallH = 1.6;
-    const panelMat = new THREE.MeshPhysicalMaterial({
+    deco.panelMat = new THREE.MeshPhysicalMaterial({
       color: 0x55ccee, transparent: true, opacity: 0.13,
       emissive: 0x2aa8cc, emissiveIntensity: 0.5,
       roughness: 0.2, metalness: 0.1, side: THREE.DoubleSide, depthWrite: false,
     });
-    const railMat = new THREE.MeshBasicMaterial({ color: 0x7ee6ff, transparent: true, opacity: 0.65 });
+    deco.railMat = new THREE.MeshBasicMaterial({ color: 0x7ee6ff, transparent: true, opacity: 0.65 });
     const postMat = new THREE.MeshPhysicalMaterial({
       color: 0x2b3a4d, emissive: 0x39c2e6, emissiveIntensity: 0.35,
       roughness: 0.4, metalness: 0.7,
     });
     const mkWall = (w, x, z, ry) => {
       const g = new THREE.Group();
-      const panel = new THREE.Mesh(new THREE.PlaneGeometry(w, wallH), panelMat);
+      const panel = new THREE.Mesh(new THREE.PlaneGeometry(w, wallH), deco.panelMat);
       panel.position.y = wallH / 2;
       g.add(panel);
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(w, 0.07, 0.07), railMat);
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(w, 0.07, 0.07), deco.railMat);
       rail.position.y = wallH;
       g.add(rail);
       const base = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, 0.16), postMat);
@@ -273,16 +460,35 @@ export function createDiceTray(container, opts = {}) {
     mkWall(TRAY * 2, 0, TRAY, 0);
     mkWall(TRAY * 2, -TRAY, 0, Math.PI / 2);
     mkWall(TRAY * 2, TRAY, 0, Math.PI / 2);
-    // corner posts
     for (const [px, pz] of [[-TRAY, -TRAY], [TRAY, -TRAY], [-TRAY, TRAY], [TRAY, TRAY]]) {
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, wallH + 0.25, 6), postMat);
       post.position.set(px, (wallH + 0.25) / 2, pz);
       scene.add(post);
     }
-    // a cool rim light so the walls read as light sources
     const rim = new THREE.PointLight(0x66d9ff, 0.5, TRAY * 4);
     rim.position.set(0, 3.5, 0);
     scene.add(rim);
+
+    // back-wall HUD strip: flickering "UNION OMNINET" readout
+    const hud = document.createElement("canvas");
+    hud.width = 512; hud.height = 64;
+    const hctx = hud.getContext("2d");
+    hctx.fillStyle = "rgba(10,20,28,0.6)";
+    hctx.fillRect(0, 0, 512, 64);
+    hctx.font = "bold 26px 'IBM Plex Mono', monospace";
+    hctx.fillStyle = "#7ee6ff";
+    hctx.fillText("LANCER//UPLINK", 18, 40);
+    hctx.fillStyle = "#39c2e6";
+    hctx.font = "14px monospace";
+    hctx.fillText("UNION OMNINET ▮▮▮▯▯ LINK STABLE", 290, 38);
+    const hudTex = new THREE.CanvasTexture(hud);
+    deco.holoMat = new THREE.MeshBasicMaterial({
+      map: hudTex, transparent: true, opacity: 0.7,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    });
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(TRAY * 1.5, TRAY * 1.5 / 8), deco.holoMat);
+    strip.position.set(0, 1.05, -TRAY + 0.06);
+    scene.add(strip);
   }
 
   // physics
@@ -344,7 +550,10 @@ export function createDiceTray(container, opts = {}) {
 
     faces.forEach((f, i) => {
       const disp = type === "d10" ? (values[i] === 0 ? 10 : values[i]) : values[i];
-      const tex = numberTexture(disp, c.num);
+      // the 20 face carries the manufacturer's sigil instead of a number
+      const tex = (type === "d20" && disp === 20 && role === "normal")
+        ? sigilTexture(getSchemeKey(), c.num)
+        : numberTexture(disp, c.num);
       const size = type === "d6" ? 0.8 : type === "d20" ? 0.62 : 0.7;
       const plane = new THREE.Mesh(
         new THREE.PlaneGeometry(size, size),
@@ -467,7 +676,8 @@ export function createDiceTray(container, opts = {}) {
     return new Promise((resolve) => {
       if (rolling || !list.length) { resolve(null); return; }
       rolling = true;
-      resetCamera(); // pull back from the staging close-up for the throw
+      // the camera STAYS at the staging close-up through the throw — it only
+      // moves again when the result zoom kicks in
       stage(list);
       list.forEach((die) => {
         die.staged = false;
@@ -537,7 +747,8 @@ export function createDiceTray(container, opts = {}) {
       dice.push(d);
     });
     stage();
-    await new Promise((r) => setTimeout(r, 250));
+    stageView(); // same cinematic close-up the roller saw
+    await new Promise((r) => setTimeout(r, 350));
     return throwDice(dice.slice(), power);
   }
 
@@ -639,6 +850,26 @@ export function createDiceTray(container, opts = {}) {
       lookAtPt.lerpVectors(camTween.fromL, camTween.toL, k);
       camera.lookAt(lookAtPt);
       if (camTween.t >= 1) camTween = null;
+    }
+
+    // ---- ambient deco animation -------------------------------------------
+    deco.t += dt;
+    deco.rings[0].rotation.y += dt * 0.25;
+    deco.rings[1].rotation.y -= dt * 0.12;
+    if (deco.panelMat) deco.panelMat.opacity = 0.10 + 0.05 * (1 + Math.sin(deco.t * 1.4)) / 2;
+    if (deco.railMat) deco.railMat.opacity = 0.5 + 0.18 * Math.sin(deco.t * 2.1);
+    if (deco.holoMat) {
+      // occasional holo flicker
+      deco.holoMat.opacity = Math.random() < 0.03 ? 0.25 + Math.random() * 0.3 : 0.7;
+    }
+    if (deco.dust) {
+      const pos = deco.dust.geometry.getAttribute("position");
+      for (let i = 0; i < pos.count; i++) {
+        let y = pos.getY(i) + dt * (0.12 + (i % 5) * 0.025);
+        if (y > 5.2) y = 0;
+        pos.setY(i, y);
+      }
+      pos.needsUpdate = true;
     }
 
     renderer.render(scene, camera);

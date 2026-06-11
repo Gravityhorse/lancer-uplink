@@ -1287,12 +1287,11 @@ async function doRoll() {
 
     // crit & labels (Lancer: an attack totalling 20+ crits; nat 1 always whiffs)
     // Lancer crit rule: ANY attack totalling 20+ crits — there are no special
-    // natural 20s. A natural 1 still earns commentary from the NHP.
+    // natural 20s. A natural 1 gets no label; the NHP says enough.
     let critTxt = "";
     let isCrit = false;
     if (res.d20 != null) {
       if (res.d20 === 1) {
-        critTxt = "✘ NAT 1";
         showQuip();
       } else if ((ctx.kind === "atk" || ctx.kind === "tech") && res.total >= 20) {
         critTxt = "⚡ CRIT (20+)";

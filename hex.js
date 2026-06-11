@@ -57,17 +57,27 @@ function applyCellSize() {
 }
 
 export async function calibrate() {
-  grid.dpi = await OBR.grid.getDpi();
-  const type = await OBR.grid.getType();
-  grid.isHexGrid = type === "HEX_VERTICAL" || type === "HEX_HORIZONTAL";
-  grid.autoPointy = type !== "HEX_HORIZONTAL";
+  // The grid API lives at OBR.scene.grid (it belongs to the scene). Older SDK
+  // builds exposed OBR.grid — accept either so this never silently breaks.
+  const G = (OBR.scene && OBR.scene.grid) || OBR.grid;
+  if (!G) throw new Error("grid API unavailable");
+
+  try {
+    grid.dpi = await G.getDpi();
+    const type = await G.getType();
+    grid.isHexGrid = type === "HEX_VERTICAL" || type === "HEX_HORIZONTAL";
+    grid.autoPointy = type !== "HEX_HORIZONTAL";
+  } catch (e) {
+    console.warn("[LANCER//UPLINK] grid type/dpi read failed — using defaults", e);
+  }
   grid.R = grid.dpi / SQRT3;
   grid.S = grid.dpi;
   applyMode();
 
   try {
-    // Snap an arbitrary point to find one true cell center.
-    const c0 = await OBR.grid.snapPosition({ x: 5000.37, y: 4097.91 });
+    // Snap an arbitrary point to find one true cell center — this anchors the
+    // whole lattice, which is what makes templates land ON the scene's grid.
+    const c0 = await G.snapPosition({ x: 5000.37, y: 4097.91 });
     grid.origin = c0;
 
     if (grid.isHexGrid) {
@@ -76,7 +86,7 @@ export async function calibrate() {
       const probeDist = grid.dpi * 1.02;
       for (let a = 0; a < 360; a += 30) {
         const rad = (a * Math.PI) / 180;
-        const p = await OBR.grid.snapPosition({
+        const p = await G.snapPosition({
           x: c0.x + probeDist * Math.cos(rad),
           y: c0.y + probeDist * Math.sin(rad),
         });
@@ -96,7 +106,7 @@ export async function calibrate() {
       }
     } else {
       // Square: measure cell size from a horizontal probe.
-      const p = await OBR.grid.snapPosition({ x: c0.x + grid.dpi * 1.02, y: c0.y });
+      const p = await G.snapPosition({ x: c0.x + grid.dpi * 1.02, y: c0.y });
       const d = Math.abs(p.x - c0.x);
       if (d > 1) grid.S = d;
     }
@@ -253,8 +263,47 @@ export function hexCone(origin, rad, n) {
   }
   const out = [];
   for (let d = 1; d <= n; d++) {
-    const row = (buckets.get(d) || []).sort((x, y) => x.a - y.a || x.s - y.s);
-    out.push(...row.slice(0, d).map((x) => x.h));
+    const row = buckets.get(d) || [];
+    out.push(...pickConeRow(row, d).map((x) => x.h));
   }
   return out;
+}
+
+// Pick exactly d cells from a distance-row, SYMMETRIC about the aim line —
+// the rulebook triangle. Cells at mirrored angles (±x) form pair-groups; we
+// choose the subset of groups whose sizes sum to d with the smallest total
+// angular offset. Aimed along a hex edge this yields the canonical
+// 1 / ±pair / centre+±pair / … spread instead of a lopsided wedge.
+function pickConeRow(cells, d) {
+  if (!cells.length) return [];
+  const groups = [];
+  const byKey = new Map();
+  for (const c of cells) {
+    const key = Math.round(Math.abs(c.s) * 200); // ~0.005 rad buckets
+    let g = byKey.get(key);
+    if (!g) { g = { w: Math.abs(c.s), cells: [] }; byKey.set(key, g); groups.push(g); }
+    g.cells.push(c);
+  }
+  groups.sort((a, b) => a.w - b.w);
+
+  let best = null;
+  const search = (i, left, picked, weight) => {
+    if (left === 0) {
+      if (!best || weight < best.weight) best = { cells: picked.slice(), weight };
+      return;
+    }
+    if (i >= groups.length) return;
+    if (best && weight >= best.weight) return;
+    const g = groups[i];
+    if (g.cells.length <= left) {
+      picked.push(...g.cells);
+      search(i + 1, left - g.cells.length, picked, weight + g.w * g.cells.length);
+      picked.length -= g.cells.length;
+    }
+    search(i + 1, left, picked, weight);
+  };
+  search(0, Math.min(d, cells.length), [], 0);
+  if (best) return best.cells;
+  // no symmetric combination fits (vertex-aimed odd rows) — take the closest
+  return cells.slice().sort((a, b) => Math.abs(a.s) - Math.abs(b.s) || a.s - b.s).slice(0, d);
 }
