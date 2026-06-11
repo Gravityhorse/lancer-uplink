@@ -549,12 +549,28 @@ export function createDiceTray(container, opts = {}) {
       }
     });
 
-    // HORUS glitch shimmer
+    // HORUS glitch: emissive shimmer always; while ROLLING the dice visibly
+    // "corrupt" — random position pops + scale stutter + a CSS channel-shift
+    // class on the tray container (styled in index.html).
     const scheme = getScheme();
+    container.classList.toggle("glitching", !!scheme.glitch && rolling);
     if (scheme.glitch) {
       glitchT += dt;
       const f = 0.3 + 0.7 * Math.abs(Math.sin(glitchT * 9.3));
-      dice.forEach((d) => { if (d.role === "normal") d.mesh.material.emissiveIntensity = f; });
+      dice.forEach((d) => {
+        if (d.role === "normal") d.mesh.material.emissiveIntensity = f;
+        if (rolling && Math.random() < 0.12) {
+          // visual-only teleport stutter; physics body is untouched
+          d.mesh.position.x += (Math.random() - 0.5) * 0.45;
+          d.mesh.position.z += (Math.random() - 0.5) * 0.45;
+          const sc = 0.85 + Math.random() * 0.4;
+          d.mesh.scale.setScalar(sc);
+        } else if (!rolling) {
+          d.mesh.scale.setScalar(1);
+        }
+      });
+    } else {
+      dice.forEach((d) => d.mesh.scale.setScalar(1));
     }
 
     if (camTween) {

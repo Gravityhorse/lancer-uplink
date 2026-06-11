@@ -3,21 +3,26 @@
 Things that would make this tool genuinely great, roughly ordered by
 bang-for-buck.
 
+## Shipped in 2.1.0 ✓
+
+- ✓ Token bond (with follow-on-move)
+- ✓ Pilot + reactor state persisted in localStorage
+- ✓ Heat auto-apply button on Overkill rolls
+- ✓ Crit damage helper (FIRE doubles dice, keeps highest per pair)
+- ✓ Auto structure / overheat table macro (toggle in MAP → HOUSE RULES)
+- ✓ Square grid support (manual toggle + auto-detect)
+- ✓ MISSION//CONTROL GM squad telemetry view
+- ✓ Talents, core power, weapon + invade hover tooltips
+- ✓ Personalizations +2 HP
+
 ## High value, low effort
 
-- **Token bond.** Claim a token on the map; MOVE / SENSORS / weapon-range
-  fields then auto-centre on it (and follow it when it moves) instead of
-  needing a click. The old prototype had a "CLAIM SELECTED TOKEN" button —
-  worth resurrecting.
-- **Persist the loaded pilot** in `localStorage` (and the HP/Heat tracker
-  state) so a page refresh or reconnect doesn't mean re-uploading the JSON.
 - **Loading / Ordnance tracking.** Grey out a Loading weapon's ATK/FIRE
   buttons after it fires until a Reload action is clicked.
-- **Heat auto-apply.** When an Overkill roll generates Heat, offer a one-click
-  "+N HEAT" button that bumps the tracker (and warn at heat cap / suggest a
-  structure-style overheat check).
-- **Crit damage helper.** On a 20+ attack, the FIRE roll should offer Lancer
-  crit rules: roll all damage dice twice, keep the highest of each.
+- **More system-granted stat bonuses** (the Personalizations hook generalises:
+  scan `lancer-data` bonuses arrays instead of special-casing IDs).
+- **GM click-to-ping**: in MISSION//CONTROL, click a lancer to flash their
+  bonded token on the map.
 
 ## Dice & rolls
 

@@ -13,6 +13,7 @@
         --text: #e6e9ee; --muted: #9aa4b2;
         --crimson: #a32630; --crimson-2: #8e2229; --gold: #ffb454;
         --good: #58c178; --tech: #3da5ff; --hpblue: #2196f3; --heatred: #ff3d00;
+        --corewhite: #e8e6df;
         --navy: #16213e; --lavender: #b7a6e8;
         --font: "Chakra Petch", "Segoe UI", sans-serif;
         --mono: "IBM Plex Mono", Consolas, monospace;
@@ -21,28 +22,19 @@
       html, body { height: 100%; }
       body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--text); font-size: 13px; }
 
-      /* ---------- header ---------- */
+      /* ---------- sticky top bar (header + tabs stay put while you scroll) ---------- */
+      #topbar { position: sticky; top: 0; z-index: 60; background: var(--bg); box-shadow: 0 3px 10px rgba(0,0,0,0.45); }
       header { padding: 8px 12px 6px; border-bottom: 2px solid var(--crimson); display: flex; align-items: center; gap: 8px; background: linear-gradient(180deg, #1a1e25 0%, #15181d 100%); }
-      header img { width: 20px; height: 20px; }
-      header h1 { font-size: 15px; letter-spacing: 3px; margin: 0; font-weight: 700; }
+      #hdr-icon { width: 22px; height: 22px; cursor: pointer; transition: transform 0.45s ease; }
+      #hdr-icon.rot { transform: rotate(180deg); }
+      header h1 { font-size: 15px; letter-spacing: 3px; margin: 0; font-weight: 700; user-select: none; }
       header h1 .slash { color: var(--crimson); }
-      #conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-left: auto; box-shadow: 0 0 6px currentColor; }
+      header h1.gm .slash { color: var(--tech); }
+      #conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-left: auto; box-shadow: 0 0 6px currentColor; flex: none; }
       #conn-dot.on { background: var(--good); color: var(--good); }
-
       nav.tabs { display: flex; background: var(--panel); border-bottom: 1px solid var(--line); }
       nav.tabs button { flex: 1; background: none; border: none; color: var(--muted); padding: 9px 4px; font-family: var(--font); font-size: 12px; font-weight: 600; letter-spacing: 2px; cursor: pointer; border-bottom: 2px solid transparent; }
       nav.tabs button.active { color: var(--text); border-bottom-color: var(--crimson); background: linear-gradient(180deg, transparent 60%, rgba(163,38,48,0.15)); }
-
-      /* ---------- persistent template bar ---------- */
-      #tmplbar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: #181b21; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-      #tmplbar .tb { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); font-family: var(--font); font-size: 10px; font-weight: 600; letter-spacing: 1px; padding: 5px 7px; cursor: pointer; clip-path: polygon(0 0, calc(100% - 5px) 0, 100% 100%, 5px 100%); }
-      #tmplbar .tb:hover { border-color: var(--crimson); color: #fff; }
-      #tmplbar .tb.sel { background: var(--crimson); border-color: var(--crimson); color: #fff; }
-      #tmplbar .tb.green { border-left: 3px solid var(--good); }
-      #tmplbar .tb.blue { border-left: 3px solid var(--tech); }
-      #tmplbar .tb.red { border-left: 3px solid var(--crimson); }
-      #vis-toggle { margin-left: auto; background: var(--panel-2); border: 1px solid var(--line); color: var(--gold); font-family: var(--mono); font-size: 10px; padding: 5px 8px; cursor: pointer; border-radius: 3px; }
-      #vis-toggle.all { color: var(--good); }
 
       main { padding: 10px 12px 16px; }
       .tabpane { display: none; } .tabpane.active { display: block; }
@@ -69,6 +61,7 @@
       details[open] > summary::before { content: "▾ "; }
       details > .body { background: var(--panel); border: 1px solid var(--line); border-top: none; padding: 10px; }
       details.navyhead > summary { background: #2f3f6e; }
+      details.goldhead > summary { background: #7a5a1d; }
 
       /* ---------- pilot ---------- */
       .filebtn { display: block; text-align: center; cursor: pointer; border: 1px dashed var(--line); border-radius: 6px; padding: 14px; color: var(--muted); background: var(--panel); }
@@ -84,12 +77,12 @@
       .mech-head .pilot { color: var(--muted); font-size: 11px; margin-top: 2px; font-family: var(--mono); }
       .mech-head .sizehex { position: absolute; top: 10px; right: 12px; font-family: var(--mono); font-size: 10px; color: var(--muted); border: 1px solid var(--line); padding: 3px 7px; clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); background: var(--panel-2); }
 
-      /* mobility bar: Move / Boost / Sensors / Tech — above the stat blocks */
       .mobility { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-bottom: 8px; }
       .mob-btn { border: none; cursor: pointer; padding: 7px 4px; font-family: var(--font); font-weight: 700; font-size: 11px; letter-spacing: 1px; color: #fff; clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 100%, 7px 100%); }
       .mob-btn small { display: block; font-weight: 400; font-size: 9px; opacity: 0.85; letter-spacing: 0.5px; }
       .mob-btn.green { background: #2f7d49; }
       .mob-btn.blue { background: #2f6bbd; }
+      .mob-btn.on { outline: 2px solid #fff; }
       .mob-btn:hover { filter: brightness(1.2); }
 
       .viewtoggle { display: flex; gap: 4px; margin-bottom: 8px; }
@@ -105,19 +98,25 @@
       .ccwrap { margin-bottom: 4px; }
       .ccrow { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
       .ccrow .lbl { width: 52px; font-size: 10px; font-weight: 700; letter-spacing: 1px; color: var(--muted); text-align: right; flex: none; }
+      .ccrow .lbl.help { cursor: help; text-decoration: underline dotted; }
       .ccrow .val { width: 52px; font-family: var(--mono); font-size: 11px; color: var(--text); flex: none; }
       .segbar { display: flex; gap: 3px; flex: 1; height: 16px; padding: 0 6px; }
       .segbar .seg { flex: 1; background: #262b33; border: 1px solid #10131a; transform: skewX(-24deg); min-width: 4px; }
       .segbar .seg.on { background: var(--segc, var(--hpblue)); box-shadow: 0 0 5px var(--segc, var(--hpblue)) inset; }
-      .ccrow .pm { width: 20px; height: 20px; flex: none; background: var(--panel-2); border: 1px solid var(--line); color: var(--text); cursor: pointer; font-family: var(--mono); font-size: 13px; line-height: 1; border-radius: 3px; padding: 0; }
-      .ccrow .pm:hover { border-color: var(--crimson); }
-      .ccpips { display: flex; gap: 14px; margin: 2px 0 8px 58px; font-family: var(--mono); font-size: 10px; color: var(--muted); flex-wrap: wrap; }
+      .ccrow .pm, .pp { width: 20px; height: 20px; flex: none; background: var(--panel-2); border: 1px solid var(--line); color: var(--text); cursor: pointer; font-family: var(--mono); font-size: 13px; line-height: 1; border-radius: 3px; padding: 0; }
+      .ccrow .pm:hover, .pp:hover { border-color: var(--crimson); }
+      .pp { width: 16px; height: 16px; font-size: 11px; vertical-align: middle; }
+      .ccpips { display: flex; gap: 12px; margin: 2px 0 8px 58px; font-family: var(--mono); font-size: 10px; color: var(--muted); flex-wrap: wrap; align-items: center; }
       .ccpips b { color: var(--text); }
 
       .weapon { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--crimson); padding: 8px; margin-bottom: 6px; }
       .weapon.techw { border-left-color: var(--tech); }
       .weapon .top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-      .weapon .wname { font-weight: 600; letter-spacing: 0.5px; }
+      .weapon .wname { font-weight: 600; letter-spacing: 0.5px; cursor: help; display: inline-flex; align-items: center; gap: 5px; }
+      .weapon .wname:hover { color: var(--gold); }
+      .weapon.techw .wname:hover { color: var(--tech); }
+      .acticon { width: 13px; height: 13px; flex: none; color: var(--gold); }
+      .weapon.techw .acticon { color: var(--tech); }
       .weapon .meta { color: var(--muted); font-size: 11px; margin-top: 3px; font-family: var(--mono); }
       .weapon .tags { color: var(--gold); font-size: 10px; letter-spacing: 1px; margin-top: 2px; }
       .weapon .btn.lock { background: #5c1218; border: 1px solid var(--crimson); font-size: 13px; padding: 4px 7px; }
@@ -127,11 +126,14 @@
       .sys-wrap { display: flex; flex-wrap: wrap; gap: 4px; }
       .system { background: var(--panel-2); border: 1px solid var(--line); padding: 4px 9px; font-size: 11px; cursor: help; clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 100%, 6px 100%); }
       .system:hover { border-color: var(--lavender); color: #fff; }
+      .system.invade { border-left: 3px solid var(--tech); cursor: pointer; }
+      .system.invade:hover { border-color: var(--tech); }
+      .system.talent { border-left: 3px solid var(--gold); }
 
-      /* system tooltip */
-      #tooltip { position: fixed; z-index: 99; max-width: 300px; background: var(--navy); border: 1px solid var(--lavender); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.6); pointer-events: none; display: none; }
+      /* tooltip */
+      #tooltip { position: fixed; z-index: 99; max-width: 310px; background: var(--navy); border: 1px solid var(--lavender); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.6); pointer-events: none; display: none; }
       #tooltip .tt-head { background: var(--lavender); color: #16213e; font-weight: 700; font-size: 11px; letter-spacing: 1px; padding: 5px 9px; border-radius: 5px 5px 0 0; text-transform: uppercase; }
-      #tooltip .tt-body { padding: 8px 10px; font-size: 11.5px; line-height: 1.45; color: #dfe4f5; }
+      #tooltip .tt-body { padding: 8px 10px; font-size: 11.5px; line-height: 1.45; color: #dfe4f5; max-height: 220px; overflow: hidden; }
 
       /* ---------- dice ---------- */
       .dice-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
@@ -141,9 +143,16 @@
       #roll-context:empty { display: none; }
 
       #traywrap { position: relative; }
-      .dicetray { width: 100%; height: 250px; background: radial-gradient(ellipse at 50% 30%, #1b2230 0%, #0e1014 100%); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+      .dicetray { width: 100%; height: 270px; background: radial-gradient(ellipse at 50% 30%, #1b2230 0%, #0e1014 100%); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+      /* HORUS cascade corruption while rolling */
+      .dicetray.glitching canvas { animation: hglitch 0.16s steps(2) infinite; }
+      @keyframes hglitch {
+        0% { filter: none; transform: translate(0, 0); }
+        40% { filter: hue-rotate(70deg) saturate(2.2) contrast(1.2); transform: translate(1.5px, -1px); }
+        60% { filter: hue-rotate(-50deg) saturate(1.6); transform: translate(-1.5px, 1px) scaleX(1.005); }
+        100% { filter: none; transform: translate(0, 0); }
+      }
 
-      /* result popup: top-left of the tray, rounded square */
       #resultbox { position: absolute; top: 10px; left: 10px; display: none; align-items: center; gap: 8px; z-index: 5; }
       #resultbox.show { display: flex; }
       #resultcard { background: rgba(10, 12, 16, 0.92); border: 2px solid var(--gold); border-radius: 10px; padding: 6px 14px; text-align: center; min-width: 64px; box-shadow: 0 4px 14px rgba(0,0,0,0.6); }
@@ -155,15 +164,21 @@
       #firebtn { display: none; background: #ff1a1a; color: #fff; border: 2px solid #ff6b6b; border-radius: 8px; font-family: var(--font); font-weight: 700; font-size: 15px; letter-spacing: 3px; padding: 10px 16px; cursor: pointer; text-shadow: 0 0 6px #fff; box-shadow: 0 0 14px rgba(255, 26, 26, 0.7); animation: firepulse 0.9s ease-in-out infinite alternate; }
       #firebtn.show { display: inline-block; }
       @keyframes firepulse { from { box-shadow: 0 0 8px rgba(255,26,26,0.5); } to { box-shadow: 0 0 22px rgba(255,26,26,0.95); } }
+      #heatapply { display: none; background: #7a2d00; color: #ffb454; border: 1px solid var(--heatred); border-radius: 8px; font-family: var(--mono); font-weight: 700; font-size: 11px; padding: 8px 10px; cursor: pointer; }
+      #heatapply.show { display: inline-block; }
       #resultclear { background: rgba(10,12,16,0.85); border: 1px solid var(--line); color: var(--muted); border-radius: 6px; width: 24px; height: 24px; cursor: pointer; font-size: 12px; line-height: 1; padding: 0; }
       #resultclear:hover { color: #fff; border-color: var(--crimson); }
       #remote-banner { position: absolute; top: 10px; right: 10px; z-index: 5; display: none; background: rgba(10,12,16,0.9); border: 1px solid var(--tech); border-radius: 6px; color: var(--tech); font-family: var(--mono); font-size: 10px; padding: 4px 8px; }
+
+      /* ROLL / CLEAR live INSIDE the tray window, pinned to its bottom edge */
+      #trayui { position: absolute; bottom: 8px; left: 8px; right: 8px; display: flex; gap: 6px; z-index: 5; }
+      #rolldice { flex: 2; font-size: 14px; letter-spacing: 3px; padding: 9px; background: rgba(163,38,48,0.92); }
+      #cleardice { flex: 1; background: rgba(35,40,50,0.88); border: 1px solid var(--line); }
 
       .dice-picker { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; margin-top: 8px; }
       .die-btn { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 4px; padding: 8px 0; font-size: 12px; font-weight: 700; font-family: var(--mono); cursor: pointer; }
       .die-btn:hover { border-color: var(--crimson); color: #fff; }
       .die-btn:active { transform: translateY(1px); }
-
       .adv-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
       .advcount { margin-left: auto; font-size: 11px; font-family: var(--mono); }
 
@@ -171,19 +186,16 @@
       .stepper { display: flex; align-items: center; gap: 4px; }
       .stepper .pm { width: 22px; height: 22px; background: var(--panel-2); border: 1px solid var(--line); color: var(--text); cursor: pointer; font-family: var(--mono); border-radius: 3px; padding: 0; }
       .stepper input { width: 48px; text-align: center; padding: 3px 4px; }
-      .stepper .steplbl { font-size: 9px; letter-spacing: 1px; color: var(--muted); }
       .chk { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); margin: 0; cursor: pointer; }
       .chk input { width: auto; }
       .chk.ok-on { color: var(--gold); font-weight: 700; }
-
-      .roll-row { display: flex; gap: 8px; margin-top: 8px; }
-      #rolldice { flex: 2; font-size: 14px; letter-spacing: 3px; padding: 10px; }
-      #cleardice { flex: 1; }
+      .steplbl { font-size: 9px; letter-spacing: 1px; color: var(--muted); }
 
       #rolllog { max-height: 200px; overflow-y: auto; }
       .roll { background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--crimson); border-radius: 3px; padding: 6px 8px; margin-bottom: 6px; font-size: 12px; }
       .roll.dmg { border-left-color: var(--gold); }
       .roll.tech { border-left-color: var(--tech); }
+      .roll.sys { border-left-color: var(--lavender); }
       .roll.remote { border-left-color: var(--muted); }
       .roll.private { border-left-color: var(--gold); opacity: 0.92; }
       .roll .who { color: var(--muted); font-size: 10px; letter-spacing: 1px; }
@@ -191,34 +203,52 @@
       .roll .detail { color: var(--muted); font-size: 11px; font-family: var(--mono); }
       .crit { color: var(--gold); }
       .private-badge { color: var(--gold); font-size: 9px; letter-spacing: 1px; }
+
+      /* ---------- map tab ---------- */
+      .bond-status { font-family: var(--mono); font-size: 11px; color: var(--muted); align-self: center; }
+      .bond-status.on { color: var(--good); }
+      #vis-toggle { background: var(--panel-2); border: 1px solid var(--line); color: var(--gold); font-family: var(--mono); font-size: 11px; padding: 6px 10px; cursor: pointer; border-radius: 3px; }
+      #vis-toggle.all { color: var(--good); }
+
+      /* ---------- MISSION//CONTROL (GM) ---------- */
+      #gm-pane { display: none; padding: 10px 12px 16px; }
+      #gm-pane.active { display: block; }
+      .gm-note { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-bottom: 10px; line-height: 1.5; }
+      .lancer-card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--tech); margin-bottom: 8px; cursor: pointer; }
+      .lancer-card .lc-head { display: flex; align-items: baseline; gap: 8px; padding: 8px 10px 4px; }
+      .lancer-card .lc-callsign { font-weight: 700; font-size: 14px; letter-spacing: 1px; text-transform: uppercase; }
+      .lancer-card .lc-mech { color: var(--gold); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+      .lancer-card .lc-player { margin-left: auto; color: var(--muted); font-size: 10px; font-family: var(--mono); }
+      .lc-bars { padding: 0 10px 8px; }
+      .lc-barrow { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+      .lc-barrow .k { width: 36px; font-size: 9px; font-weight: 700; letter-spacing: 1px; color: var(--muted); text-align: right; }
+      .lc-bar { flex: 1; height: 10px; background: #262b33; border: 1px solid #10131a; position: relative; overflow: hidden; }
+      .lc-bar .fill { position: absolute; inset: 0; right: auto; background: var(--hpblue); }
+      .lc-bar.heat .fill { background: var(--heatred); }
+      .lc-barrow .v { width: 58px; font-family: var(--mono); font-size: 10px; }
+      .lc-pips { display: flex; gap: 12px; padding: 0 10px 8px; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+      .lc-pips b { color: var(--text); }
+      .lc-detail { display: none; border-top: 1px solid var(--line); padding: 8px 10px; }
+      .lancer-card.open .lc-detail { display: block; }
+      .lc-stale { opacity: 0.45; }
+      .gm-empty { color: var(--muted); font-family: var(--mono); font-size: 11px; padding: 20px; text-align: center; border: 1px dashed var(--line); }
     </style>
   </head>
   <body>
-    <header>
-      <img src="./icons/logo.svg" alt="" onerror="this.style.display='none'" />
-      <h1>LANCER<span class="slash">//</span>UPLINK</h1>
-      <span id="conn-dot" title="Owlbear link status"></span>
-    </header>
-
-    <nav class="tabs">
-      <button data-tab="pilot" class="active">PILOT</button>
-      <button data-tab="dice">DICE</button>
-      <button data-tab="map">MAP</button>
-    </nav>
-
-    <!-- persistent template bar: click a shape, then click-drag on the map -->
-    <div id="tmplbar">
-      <button class="tb red" data-mode="blast" title="Blast — drag: origin is the centre, drag out to set the radius">BLAST</button>
-      <button class="tb red" data-mode="cone" title="Cone — drag from the origin toward the target">CONE</button>
-      <button class="tb red" data-mode="line" title="Line — drag from the origin toward the target">LINE</button>
-      <button class="tb green" data-mode="move" title="Movement range (always private)">MOVE</button>
-      <button class="tb blue" data-mode="tech" title="Sensor / tech range (always private)">SENS</button>
-      <button class="tb" data-mode="terrain" title="Toggle difficult terrain hexes">TERR</button>
-      <button class="tb" data-mode="erase" title="Erase templates & terrain">ERASE</button>
-      <button id="vis-toggle" class="all" title="Who sees weapon templates you place">👁 ALL</button>
+    <div id="topbar">
+      <header>
+        <img id="hdr-icon" src="./icons/tool.svg" alt="mode" title="Toggle MISSION//CONTROL (GM view)" onerror="this.style.display='none'" />
+        <h1 id="hdr-title">LANCER<span class="slash">//</span>UPLINK</h1>
+        <span id="conn-dot" title="Owlbear link status"></span>
+      </header>
+      <nav class="tabs" id="tabnav">
+        <button data-tab="pilot" class="active">PILOT</button>
+        <button data-tab="dice">DICE</button>
+        <button data-tab="map">MAP</button>
+      </nav>
     </div>
 
-    <main>
+    <main id="player-main">
       <!-- ============================ PILOT ============================ -->
       <section id="tab-pilot" class="tabpane active">
         <details id="sec-import" open>
@@ -228,7 +258,7 @@
               Click to upload a COMP/CON pilot or roster export (.json)
               <input id="pilotfile" type="file" accept=".json,application/json" />
             </label>
-            <p class="muted" style="margin:6px 0 0">COMP/CON: <b>Pilot Roster → Export → Download pilot as JSON</b>. Roster files with multiple pilots work too.</p>
+            <p class="muted" style="margin:6px 0 0">COMP/CON: <b>Pilot Roster → Export → Download pilot as JSON</b>. Your pilot is remembered between sessions; re-upload to update.</p>
             <div id="pilotpicker" class="hidden">
               <label>Pilot</label>
               <select id="pilotselect"></select>
@@ -237,6 +267,7 @@
               <label>Active mech</label>
               <select id="mechselect"></select>
             </div>
+            <button id="forgetpilot" class="btn ghost small hidden" style="margin-top:8px">FORGET SAVED PILOT</button>
           </div>
         </details>
 
@@ -248,7 +279,7 @@
             <div class="sizehex" id="m-size">SIZE 1</div>
           </div>
 
-          <!-- MOVE & SENSORS live here: above the stat blocks, below the name -->
+          <!-- MOVE & SENSORS: above the stat blocks, below the name -->
           <div class="mobility" id="mobility"></div>
 
           <div class="viewtoggle">
@@ -265,12 +296,21 @@
 
           <details id="sec-tech" class="navyhead" open>
             <summary>TECH ATTACK</summary>
-            <div class="body" id="techcard"></div>
+            <div class="body">
+              <div id="techcard"></div>
+              <div class="mount-label" style="margin-top:8px">INVADE OPTIONS — hover for details, click to roll</div>
+              <div class="sys-wrap" id="invades"></div>
+            </div>
           </details>
 
           <details id="sec-systems" open>
             <summary>SYSTEMS</summary>
             <div class="body"><div class="sys-wrap" id="systems"></div></div>
+          </details>
+
+          <details id="sec-talents" class="goldhead" open>
+            <summary>TALENTS</summary>
+            <div class="body"><div class="sys-wrap" id="talents"></div></div>
           </details>
         </div>
         <p id="status">Booting…</p>
@@ -294,9 +334,14 @@
               <div class="crit" id="result-crit"></div>
             </div>
             <button id="firebtn" title="Roll this weapon's damage">⬢ FIRE</button>
+            <button id="heatapply" title="Apply this Overkill heat to your mech">+0 HEAT</button>
             <button id="resultclear" title="Clear roll data">✕</button>
           </div>
           <div id="remote-banner"></div>
+          <div id="trayui">
+            <button id="rolldice" class="btn">ROLL</button>
+            <button id="cleardice" class="btn ghost">CLEAR</button>
+          </div>
         </div>
         <div id="trayfallback" class="muted hidden" style="margin:6px 0">3D dice need an internet connection to load. Results will still be computed.</div>
 
@@ -323,13 +368,8 @@
             <span class="steplbl">FLAT&nbsp;MOD</span>
           </div>
           <label class="chk" id="ok-wrap" title="Damage dice showing 1 explode into bonus dice; +1 Heat per 1"><input id="overkill-toggle" type="checkbox" /> OVERKILL</label>
-          <label class="chk" title="Keep only the highest normal die (D&D-style advantage)"><input id="keephigh" type="checkbox" /> KEEP HIGH</label>
+          <label class="chk" title="Keep only the highest normal die"><input id="keephigh" type="checkbox" /> KEEP HIGH</label>
           <label class="chk" title="Roll stays on your screen only"><input id="hideroll" type="checkbox" /> HIDDEN</label>
-        </div>
-
-        <div class="roll-row">
-          <button id="rolldice" class="btn">ROLL</button>
-          <button id="cleardice" class="btn ghost">CLEAR</button>
         </div>
 
         <details id="sec-log" open style="margin-top:10px">
@@ -344,15 +384,27 @@
       <!-- ============================ MAP ============================ -->
       <section id="tab-map" class="tabpane">
         <details open>
+          <summary>TOKEN BOND</summary>
+          <div class="body">
+            <p class="muted" style="margin:0 0 8px; line-height:1.5">Select your mech's token on the map, then bond it. MOVE / BOOST / SENSORS fields will centre on it automatically and follow it when it moves.</p>
+            <div class="row">
+              <button id="btn-bond" class="btn blue small">BOND SELECTED TOKEN</button>
+              <button id="btn-unbond" class="btn ghost small">CLEAR</button>
+            </div>
+            <div class="bond-status" id="bond-status" style="margin-top:6px">UNBONDED — fields are placed by clicking the map.</div>
+          </div>
+        </details>
+
+        <details open>
           <summary>TEMPLATES</summary>
           <div class="body">
             <p class="muted" style="margin:0 0 8px; line-height:1.5">
-              Use the bar above (or the <b>LANCER</b> tool in Owlbear's left toolbar).
-              <b>Click-drag</b> on the map: the press point is the origin, drag out to size and aim.
-              <span style="color:var(--good)">MOVE</span> and <span style="color:var(--tech)">SENS</span> ranges are always private to you.
-              Weapon templates follow the 👁 toggle: <b>ALL</b> = everyone sees them, <b>ME</b> = only you.
-              Everything snaps to the hex grid.
+              Select the <b>LANCER</b> tool in Owlbear's left toolbar — Blast / Cone / Line / Move / Sensors / Terrain / Erase appear in the top-centre mode bar.
+              <b>Click-drag</b>: the press point is the origin; drag out to size and aim. Everything snaps to the grid.
             </p>
+            <div class="row" style="margin-bottom:6px">
+              <button id="vis-toggle" class="all" title="Who sees weapon templates you place">👁 TEMPLATES: ALL PLAYERS</button>
+            </div>
             <div class="row">
               <button id="clearmine" class="btn ghost small">CLEAR MY TEMPLATES</button>
               <button id="clearterrain" class="btn ghost small">CLEAR TERRAIN</button>
@@ -362,15 +414,31 @@
             </div>
           </div>
         </details>
+
         <details open>
           <summary>GRID</summary>
           <div class="body">
-            <div class="muted" id="grid-readout" style="font-family:var(--mono)">Probing grid…</div>
+            <div class="muted" id="grid-readout" style="font-family:var(--mono)">Waiting for a scene…</div>
+            <label class="chk" style="margin-top:8px"><input id="square-toggle" type="checkbox" /> SQUARE GRID MODE (king-move ranges)</label>
             <button id="btn-recal" class="btn ghost small" style="margin-top:8px">RE-PROBE GRID</button>
+          </div>
+        </details>
+
+        <details open>
+          <summary>HOUSE RULES</summary>
+          <div class="body">
+            <label class="chk"><input id="macro-toggle" type="checkbox" /> AUTO STRUCTURE / OVERHEAT TABLE ROLLS</label>
+            <p class="muted" style="margin:6px 0 0; line-height:1.5">When HP hits 0 (−1 Structure, HP refills) or Heat exceeds cap (−1 Stress, heat clears), automatically roll the structure / overheating table and post the result to the combat log.</p>
           </div>
         </details>
       </section>
     </main>
+
+    <!-- ====================== MISSION//CONTROL (GM) ====================== -->
+    <section id="gm-pane">
+      <div class="gm-note">LIVE SQUAD TELEMETRY — every player with their Uplink panel open reports in automatically. Click a lancer for full readout. Click the icon up top to return to pilot mode.</div>
+      <div id="squad"></div>
+    </section>
 
     <div id="tooltip">
       <div class="tt-head" id="tt-head"></div>

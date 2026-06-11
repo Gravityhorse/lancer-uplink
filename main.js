@@ -1,25 +1,35 @@
-// main.js — wires the whole LANCER//UPLINK popover together:
-//   • COMP/CON pilot import + resolved mech sheet     (compcon.js)
-//   • One unified 3D dice system: picker, modifiers,
-//     weapon Atk / target-lock→FIRE flow, tech attacks,
-//     Overkill chains, broadcast replays               (dice3d.js)
-//   • Hex template tool + in-panel template bar        (tool.js / hex.js / overlay.js)
+// main.js — wires the whole LANCER//UPLINK popover together.
 //
-// The pilot sheet works the instant the popover opens. Owlbear-specific
-// features (template tool, broadcasts) are wired once OBR signals ready and
-// guarded so a missing API never bricks the rest of the UI.
+//   • COMP/CON pilot import (persisted in localStorage) + resolved mech sheet
+//   • One unified 3D dice system: picker, modifiers, weapon ATK / ⬢ lock →
+//     FIRE chain (with crit doubling), tech attacks, Overkill chains with
+//     heat auto-apply, broadcast replays
+//   • Template tool (registered immediately; grid calibrates when the scene
+//     is ready) + token bond so range fields follow your mech
+//   • Reactor management: HP↘0 → structure, Heat over cap → stress, with an
+//     optional auto structure/overheat table macro
+//   • MISSION//CONTROL — a GM view fed by live squad telemetry broadcasts
+//
+// Lancer rules note: GRIT applies to attack rolls only, never to damage.
 
-import { OBR, CH_ROLL3D } from "./sdk.js";
+import { OBR, CH_ROLL3D, CH_STATUS } from "./sdk.js";
 import * as hex from "./hex.js";
 import * as tool from "./tool.js";
 import {
   clearMyTemplates,
   clearLocalTemplates,
   clearAllLocalOverlays,
+  clearLocalOverlay,
+  showLocalOverlay,
+  showBoostField,
+  clearBoostField,
   clearTerrain,
   renderTerrain,
 } from "./overlay.js";
-import { loadCompendium, listPilots, parsePilot, resolveMech } from "./compcon.js";
+import {
+  loadCompendium, listPilots, parsePilot, resolveMech,
+  resolveTalents, coreInfo,
+} from "./compcon.js";
 // dice3d.js (three + cannon-es from CDN) loads lazily the first time the DICE
 // tab opens, so a CDN hiccup never bricks the pilot/template UI.
 
@@ -33,6 +43,41 @@ function setStatus(msg, cls = "") {
 
 let myName = "You";
 let obrReady = false;
+
+// ---- action-economy icons: full hexagon = Full Action, half = Quick ----------
+const ICON_FULL = `<svg class="acticon" viewBox="0 0 20 20" aria-label="Full action"><polygon points="10,1.5 17.5,5.75 17.5,14.25 10,18.5 2.5,14.25 2.5,5.75" fill="currentColor"/></svg>`;
+const ICON_QUICK = `<svg class="acticon" viewBox="0 0 20 20" aria-label="Quick action"><polygon points="10,1.5 17.5,5.75 17.5,14.25 10,18.5 2.5,14.25 2.5,5.75" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 1.5 L2.5 5.75 L2.5 14.25 L10 18.5 Z" fill="currentColor"/></svg>`;
+
+// ============================================================ PERSISTENCE =====
+const STORE_KEY = "lancer-uplink/state/v2";
+let restoreLive = null;     // saved live reactor state applied on first render
+let restoreMechIdx = null;
+let saveTimer = 0;
+
+function readStore() {
+  try { return JSON.parse(localStorage.getItem(STORE_KEY) || "null") || {}; }
+  catch (_) { return {}; }
+}
+function saveState() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({
+        pilot: curRawPilot || null,
+        mechIdx: curMechIdx,
+        live,
+        scheme: $("scheme")?.value || null,
+        vis: tool.getTemplateVisibility(),
+        square: $("square-toggle")?.checked || false,
+        macro: $("macro-toggle")?.checked || false,
+        bond,
+      }));
+    } catch (_) { /* storage may be unavailable in some embeds */ }
+  }, 250);
+}
+function forgetState() {
+  try { localStorage.removeItem(STORE_KEY); } catch (_) {}
+}
 
 // ================================================================ TAB NAV =====
 document.querySelectorAll("nav.tabs button").forEach((btn) => {
@@ -48,52 +93,127 @@ document.querySelectorAll("nav.tabs button").forEach((btn) => {
   });
 });
 const diceTabActive = () =>
-  document.getElementById("tab-dice")?.classList.contains("active");
+  document.getElementById("tab-dice")?.classList.contains("active") && !gmMode;
 
 function switchToDiceTab() {
   document.querySelector('nav.tabs button[data-tab="dice"]')?.click();
 }
 
-// ========================================================== TEMPLATE BAR ======
-// The persistent strip under the tabs: pick a shape, then click-drag the map.
-document.querySelectorAll("#tmplbar .tb[data-mode]").forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    document.querySelectorAll("#tmplbar .tb").forEach((b) =>
-      b.classList.toggle("sel", b === btn)
-    );
+// ====================================================== MISSION//CONTROL ======
+let gmMode = false;
+const squad = new Map(); // who -> last status payload
+
+$("hdr-icon")?.addEventListener("click", () => setGmMode(!gmMode));
+
+function setGmMode(on) {
+  gmMode = on;
+  $("hdr-icon")?.classList.toggle("rot", on);
+  const t = $("hdr-title");
+  if (t) {
+    t.classList.toggle("gm", on);
+    t.innerHTML = on
+      ? 'MISSION<span class="slash">//</span>CONTROL'
+      : 'LANCER<span class="slash">//</span>UPLINK';
+  }
+  $("player-main")?.classList.toggle("hidden", on);
+  $("tabnav")?.classList.toggle("hidden", on);
+  $("gm-pane")?.classList.toggle("active", on);
+  if (on) {
+    renderGM();
+    requestSquadStatus();
+  }
+}
+
+function requestSquadStatus() {
+  if (!obrReady) return;
+  try { OBR.broadcast.sendMessage(CH_STATUS, { type: "req" }, { destination: "REMOTE" }); }
+  catch (_) {}
+}
+
+let statusTimer = 0;
+function broadcastStatus() {
+  if (!obrReady || !currentMech || !currentPilot || !live) return;
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(() => {
+    const s = currentMech.stats;
     try {
-      await tool.activateMode(btn.dataset.mode);
-      setStatus(`Template tool: ${btn.textContent} — click-drag on the map.`, "status-ok");
-    } catch (e) {
-      setStatus("Template tool unavailable — open this panel inside an Owlbear scene.", "status-err");
-    }
-  });
-});
+      OBR.broadcast.sendMessage(CH_STATUS, {
+        type: "status",
+        who: myName,
+        callsign: currentPilot.callsign,
+        pilot: currentPilot.name,
+        ll: currentPilot.level,
+        mech: currentMech.name,
+        frame: s.frameName,
+        live: { ...live },
+        stats: {
+          hpMax: s.hpMax, heatMax: s.heatMax,
+          structureMax: s.structureMax, stressMax: s.stressMax,
+          repMax: s.repMax, coreMax: s.coreMax,
+          evasion: s.evasion, edef: s.edef, armor: s.armor, save: s.save,
+          speed: s.speed, sensors: s.sensors, techAttack: s.techAttack, size: s.size,
+        },
+        ts: Date.now(),
+      }, { destination: "REMOTE" });
+    } catch (_) {}
+  }, 400);
+}
 
-const visBtn = $("vis-toggle");
-visBtn?.addEventListener("click", () => {
-  const next = tool.getTemplateVisibility() === "all" ? "me" : "all";
-  tool.setTemplateVisibility(next);
-  visBtn.textContent = next === "all" ? "👁 ALL" : "👁 ME";
-  visBtn.classList.toggle("all", next === "all");
-});
-
-$("clearmine")?.addEventListener("click", async () => {
-  try { await clearMyTemplates(); await clearLocalTemplates(); }
-  catch (e) { console.warn("[LANCER//UPLINK] clear templates failed", e); }
-});
-$("clearterrain")?.addEventListener("click", async () => {
-  try { await clearTerrain(); await renderTerrain([], hex.keyToHex); }
-  catch (e) { console.warn("[LANCER//UPLINK] clear terrain failed", e); }
-});
-$("clearranges")?.addEventListener("click", async () => {
-  try { await clearAllLocalOverlays(); } catch (_) {}
-});
+function renderGM() {
+  const wrap = $("squad");
+  if (!wrap) return;
+  const entries = [...squad.values()].sort((a, b) => (a.callsign || "").localeCompare(b.callsign || ""));
+  if (!entries.length) {
+    wrap.innerHTML = `<div class="gm-empty">NO TELEMETRY YET.<br/>Players need their LANCER//UPLINK panel open with a pilot loaded.</div>`;
+    return;
+  }
+  wrap.innerHTML = "";
+  const now = Date.now();
+  for (const e of entries) {
+    const st = e.stats || {}, lv = e.live || {};
+    const bar = (cur, max, cls = "") => {
+      const pct = max ? Math.max(0, Math.min(100, (cur / max) * 100)) : 0;
+      return `<div class="lc-bar ${cls}"><div class="fill" style="width:${pct}%"></div></div>`;
+    };
+    const pips = (cur, max) => "◆".repeat(Math.max(0, cur)) + "◇".repeat(Math.max(0, (max || 0) - (cur || 0)));
+    const card = document.createElement("div");
+    card.className = `lancer-card${now - (e.ts || 0) > 60000 ? " lc-stale" : ""}`;
+    card.innerHTML = `
+      <div class="lc-head">
+        <span class="lc-callsign">${e.callsign || "PILOT"}</span>
+        <span class="lc-mech">${e.mech || ""} · ${e.frame || ""}</span>
+        <span class="lc-player">${e.who || ""} · LL${e.ll ?? "?"}</span>
+      </div>
+      <div class="lc-bars">
+        <div class="lc-barrow"><span class="k">HP</span>${bar(lv.hp, st.hpMax)}<span class="v">${lv.hp ?? "?"}/${st.hpMax ?? "?"}${lv.overshield ? ` (+${lv.overshield})` : ""}</span></div>
+        <div class="lc-barrow"><span class="k">HEAT</span>${bar(lv.heat, st.heatMax, "heat")}<span class="v">${lv.heat ?? "?"}/${st.heatMax ?? "?"}</span></div>
+      </div>
+      <div class="lc-pips">
+        <span>STRUCT <b>${pips(lv.structure, st.structureMax)}</b></span>
+        <span>STRESS <b>${pips(lv.stress, st.stressMax)}</b></span>
+        <span>REP <b>${lv.repairs ?? "?"}/${st.repMax ?? "?"}</b></span>
+        <span>CORE <b>${lv.core ?? "?"}</b></span>
+      </div>
+      <div class="lc-detail">
+        <div class="lc-pips" style="padding:0">
+          <span>EVA <b>${st.evasion ?? "?"}</b></span><span>E-DEF <b>${st.edef ?? "?"}</b></span>
+          <span>ARMOR <b>${st.armor ?? "?"}</b></span><span>SAVE <b>${st.save ?? "?"}</b></span>
+          <span>SPD <b>${st.speed ?? "?"}</b></span><span>SENS <b>${st.sensors ?? "?"}</b></span>
+          <span>TECH <b>${st.techAttack >= 0 ? "+" : ""}${st.techAttack ?? "?"}</b></span>
+          <span>SIZE <b>${st.size ?? "?"}</b></span>
+        </div>
+      </div>`;
+    card.addEventListener("click", () => card.classList.toggle("open"));
+    wrap.appendChild(card);
+  }
+}
 
 // ============================================================ PILOT IMPORT ====
 let currentPilot = null;
 let currentMechs = [];
-let currentMech = null; // resolved mech (stats/mounts/systems)
+let currentMech = null;     // resolved mech (stats/mounts/systems)
+let curRawPilot = null;     // raw pilot object — what gets persisted
+let curMechIdx = 0;
 let rosterPilots = [];
 
 $("pilotfile").addEventListener("change", async (ev) => {
@@ -102,38 +222,41 @@ $("pilotfile").addEventListener("change", async (ev) => {
   setStatus(`Reading ${file.name}…`);
   try {
     const json = JSON.parse(await file.text());
-    rosterPilots = listPilots(json);
-    if (!rosterPilots.length) {
-      const keys =
-        json && typeof json === "object"
-          ? Object.keys(json).slice(0, 12).join(", ")
-          : typeof json;
-      throw new Error(
-        `No pilots found in this file (top-level keys: ${keys}). ` +
-        `Export from COMP/CON via Pilot Roster → your pilot → Export.`
-      );
-    }
-
-    setStatus("Loading LANCER compendium…");
-    await loadCompendium((s) => setStatus(s));
-
-    const psel = $("pilotselect");
-    if (psel) {
-      psel.innerHTML = "";
-      rosterPilots.forEach((p, i) => {
-        const o = document.createElement("option");
-        o.value = String(i);
-        o.textContent = `${p.callsign || "PILOT"} — ${p.name || `Pilot ${i + 1}`}`;
-        psel.appendChild(o);
-      });
-      $("pilotpicker")?.classList.toggle("hidden", rosterPilots.length < 2);
-    }
-    selectPilot(0);
+    await importPilots(listPilots(json), json);
   } catch (err) {
     console.error("[LANCER//UPLINK] import failed", err);
     setStatus(`Import failed: ${err.message || err}`, "status-err");
   }
 });
+
+async function importPilots(pilots, json) {
+  rosterPilots = pilots;
+  if (!rosterPilots.length) {
+    const keys =
+      json && typeof json === "object"
+        ? Object.keys(json).slice(0, 12).join(", ")
+        : typeof json;
+    throw new Error(
+      `No pilots found in this file (top-level keys: ${keys}). ` +
+      `Export from COMP/CON via Pilot Roster → your pilot → Export.`
+    );
+  }
+  setStatus("Loading LANCER compendium…");
+  await loadCompendium((s) => setStatus(s));
+
+  const psel = $("pilotselect");
+  if (psel) {
+    psel.innerHTML = "";
+    rosterPilots.forEach((p, i) => {
+      const o = document.createElement("option");
+      o.value = String(i);
+      o.textContent = `${p.callsign || "PILOT"} — ${p.name || `Pilot ${i + 1}`}`;
+      psel.appendChild(o);
+    });
+    $("pilotpicker")?.classList.toggle("hidden", rosterPilots.length < 2);
+  }
+  selectPilot(0);
+}
 
 $("pilotselect")?.addEventListener("change", (e) => selectPilot(Number(e.target.value)));
 
@@ -144,6 +267,7 @@ function selectPilot(idx) {
     const { pilot, mechs } = parsePilot(raw);
     currentPilot = pilot;
     currentMechs = mechs;
+    curRawPilot = raw;
 
     const sel = $("mechselect");
     sel.innerHTML = "";
@@ -160,10 +284,15 @@ function selectPilot(idx) {
       setStatus(`${pilot.callsign} has no mechs in this export.`, "status-err");
       return;
     }
-    const activeIdx = Math.max(0, mechs.findIndex((m) => m.active));
+    let activeIdx = Math.max(0, mechs.findIndex((m) => m.active));
+    if (restoreMechIdx != null && mechs[restoreMechIdx]) {
+      activeIdx = restoreMechIdx;
+      restoreMechIdx = null;
+    }
     sel.value = String(activeIdx);
     renderMech(activeIdx);
-    $("sec-import")?.removeAttribute("open"); // tidy up once loaded
+    $("sec-import")?.removeAttribute("open");
+    $("forgetpilot")?.classList.remove("hidden");
     setStatus(`Loaded ${pilot.callsign} — “${pilot.name}”.`, "status-ok");
   } catch (err) {
     console.error("[LANCER//UPLINK] pilot parse failed", err);
@@ -173,7 +302,13 @@ function selectPilot(idx) {
 
 $("mechselect").addEventListener("change", (e) => renderMech(Number(e.target.value)));
 
-// ---- live reactor state (local; lets the CompCon bars be clickable) ----------
+$("forgetpilot")?.addEventListener("click", () => {
+  forgetState();
+  curRawPilot = null;
+  setStatus("Saved pilot forgotten. It won't auto-load next time.", "status-ok");
+});
+
+// ---- live reactor state -------------------------------------------------------
 let live = null;
 
 function initLive(m) {
@@ -188,6 +323,18 @@ function initLive(m) {
     core: pick(cur.core, s.coreMax),
     overshield: pick(cur.overshield, 0) || 0,
   };
+  if (restoreLive) {
+    live = { ...live, ...restoreLive };
+    restoreLive = null;
+  }
+}
+
+function onLiveChanged() {
+  if (!currentMech) return;
+  renderCC(currentMech.stats);
+  renderStatGrid(currentMech.stats);
+  saveState();
+  broadcastStatus();
 }
 
 function renderMech(idx) {
@@ -195,6 +342,7 @@ function renderMech(idx) {
   if (!raw || !currentPilot) return;
   const m = resolveMech(raw, currentPilot);
   currentMech = m;
+  curMechIdx = idx;
   const s = m.stats;
   initLive(m);
 
@@ -210,9 +358,114 @@ function renderMech(idx) {
   renderStatGrid(s);
   renderMounts(m);
   renderTechCard(s);
+  renderInvades(m);
   renderSystems(m);
+  renderTalentChips();
 
   $("sheet").classList.remove("hidden");
+  saveState();
+  broadcastStatus();
+}
+
+// =========================================================== RANGE FIELDS =====
+// MOVE / BOOST / SENSORS. With a bonded token they centre on it instantly and
+// follow it; without one they arm the click-to-place tool. Click again to clear.
+// Boost shows DOUBLE the speed with a strong boundary where standard move ends.
+
+let bond = null;            // { id, name }
+let activeFields = {};      // kind -> { size, boost }
+let followTimer = 0;
+
+function updateBondUI() {
+  const el = $("bond-status");
+  if (!el) return;
+  el.textContent = bond
+    ? `BONDED: ${bond.name || bond.id} — fields snap to this token and follow it.`
+    : "UNBONDED — fields are placed by clicking the map.";
+  el.classList.toggle("on", !!bond);
+}
+
+async function getBondItem() {
+  if (!bond || !obrReady) return null;
+  try {
+    const items = await OBR.scene.items.getItems([bond.id]);
+    return items[0] || null;
+  } catch (_) { return null; }
+}
+
+$("btn-bond")?.addEventListener("click", async () => {
+  if (!obrReady) return setStatus("Owlbear link not ready.", "status-err");
+  try {
+    const sel = await OBR.player.getSelection();
+    if (!sel || !sel.length) {
+      return setStatus("Select your mech's token on the map first, then bond it.", "status-err");
+    }
+    const items = await OBR.scene.items.getItems([sel[0]]);
+    bond = { id: sel[0], name: items[0]?.name || items[0]?.text?.plainText || "token" };
+    updateBondUI();
+    saveState();
+    setStatus(`Bonded to "${bond.name}".`, "status-ok");
+  } catch (e) {
+    setStatus("Could not read the selection — open a scene first.", "status-err");
+  }
+});
+
+$("btn-unbond")?.addEventListener("click", async () => {
+  bond = null;
+  updateBondUI();
+  saveState();
+  for (const kind of Object.keys(activeFields)) await removeField(kind);
+});
+
+const fieldColor = (kind) => (kind === "sensors" ? "#3da5ff" : "#5ad17a");
+
+async function placeFieldAt(kind, center, size, boost) {
+  if (boost) {
+    await showBoostField("field-boost", center, size, { color: fieldColor(kind), name: `Boost ${size}` });
+  } else {
+    await showLocalOverlay(`field-${kind}`, hex.hexesInRange(center, size, true), {
+      color: fieldColor(kind),
+      fillOpacity: 0.18, strokeOpacity: 0.85, strokeWidth: 3,
+      name: `${kind === "sensors" ? "Sensors" : "Move"} ${size}`,
+      kind: "range",
+    });
+  }
+}
+
+async function removeField(kind) {
+  if (activeFields[kind]?.boost) await clearBoostField("field-boost");
+  else await clearLocalOverlay(`field-${kind}`);
+  delete activeFields[kind];
+  markMobilityActive();
+}
+
+async function toggleField(kind, size, boost = false) {
+  if (activeFields[kind]) { await removeField(kind); return; }
+  const item = await getBondItem();
+  if (item) {
+    await placeFieldAt(kind, hex.pixelToHex(item.position), size, boost);
+    activeFields[kind] = { size, boost };
+    markMobilityActive();
+    setStatus(`${kind.toUpperCase()} field on "${bond.name}". Click the button again to clear.`, "status-ok");
+    return;
+  }
+  // no bond — fall back to click-to-place via the toolbar tool
+  try {
+    await tool.armTemplate({
+      shape: kind === "sensors" ? "tech" : "move",
+      size, boost,
+      name: `${kind === "boost" ? "Boost" : kind === "sensors" ? "Sensors" : "Move"} ${size}`,
+    });
+    setStatus(`Armed ${kind} (${size}${boost ? `+${size} boost` : ""}). Click your hex on the map — or bond a token in the MAP tab to skip this step.`, "status-ok");
+  } catch (_) {
+    setStatus("Template tool unavailable — open this panel inside an Owlbear scene.", "status-err");
+  }
+}
+
+function markMobilityActive() {
+  document.querySelectorAll(".mob-btn[data-mob]").forEach((b) => {
+    b.classList.toggle("on", !!activeFields[b.dataset.mob]);
+  });
 }
 
 // ---- MOVE & SENSORS row (above the stat blocks, below the name) --------------
@@ -220,21 +473,14 @@ function renderMobility(s) {
   const el = $("mobility");
   el.innerHTML = `
     <button class="mob-btn green" data-mob="move">MOVE<small>${s.speed} HEX</small></button>
-    <button class="mob-btn green" data-mob="boost">BOOST<small>${s.speed} HEX</small></button>
+    <button class="mob-btn green" data-mob="boost">BOOST<small>${s.speed} (+${s.speed})</small></button>
     <button class="mob-btn blue" data-mob="sensors">SENSORS<small>${s.sensors} HEX</small></button>
     <button class="mob-btn blue" data-mob="techatk">TECH ATK<small>${s.techAttack >= 0 ? "+" : ""}${s.techAttack}</small></button>`;
-  const arm = async (shape, size, name) => {
-    try {
-      await tool.armTemplate({ shape, size, name });
-      setStatus(`Armed ${name} (${size} hex). Click your token's hex on the map.`, "status-ok");
-    } catch (_) {
-      setStatus("Template tool unavailable (open inside an Owlbear scene).", "status-err");
-    }
-  };
-  el.querySelector('[data-mob="move"]').addEventListener("click", () => arm("move", s.speed, `Move ${s.speed}`));
-  el.querySelector('[data-mob="boost"]').addEventListener("click", () => arm("move", s.speed, `Boost ${s.speed}`));
-  el.querySelector('[data-mob="sensors"]').addEventListener("click", () => arm("tech", s.sensors, `Sensors ${s.sensors}`));
+  el.querySelector('[data-mob="move"]').addEventListener("click", () => toggleField("move", s.speed));
+  el.querySelector('[data-mob="boost"]').addEventListener("click", () => toggleField("boost", s.speed, true));
+  el.querySelector('[data-mob="sensors"]').addEventListener("click", () => toggleField("sensors", s.sensors));
   el.querySelector('[data-mob="techatk"]').addEventListener("click", () => prepareTechAttack());
+  markMobilityActive();
 }
 
 // ---- COMP/CON view: slanted segment bars --------------------------------------
@@ -259,37 +505,140 @@ function segBar(cur, max, color) {
 function renderCC(s) {
   const el = $("view-cc");
   if (!el || !live) return;
-  const row = (key, label, cur, max, color) => `
-    <div class="ccrow">
-      <span class="lbl">${label}</span>
+  const row = (key, label, cur, max, color, help = false) => `
+    <div class="ccrow" data-key="${key}">
+      <span class="lbl${help ? " help" : ""}">${label}</span>
       <button class="pm" data-cc="${key}" data-d="-1">−</button>
       ${segBar(cur, max, color)}
       <button class="pm" data-cc="${key}" data-d="1">+</button>
       <span class="val">${cur}/${max}</span>
     </div>`;
+  const pp = (key) =>
+    `<button class="pp" data-pp="${key}" data-d="-1">−</button><button class="pp" data-pp="${key}" data-d="1">+</button>`;
   el.innerHTML =
     row("hp", "HP", live.hp, s.hpMax, "var(--hpblue)") +
     row("heat", "HEAT", live.heat, s.heatMax, "var(--heatred)") +
-    row("repairs", "REPAIR", live.repairs, s.repMax, "#e84545") +
-    row("core", "CORE", live.core, s.coreMax, "var(--good)") +
+    row("repairs", "REPAIR", live.repairs, s.repMax, "var(--good)") +
+    row("core", "CORE", live.core, s.coreMax, "var(--corewhite)", true) +
     `<div class="ccpips">
-      <span>STRUCT <b>${"◆".repeat(live.structure)}${"◇".repeat(Math.max(0, s.structureMax - live.structure))}</b></span>
-      <span>STRESS <b>${"◆".repeat(live.stress)}${"◇".repeat(Math.max(0, s.stressMax - live.stress))}</b></span>
-      <span>O.SHLD <b>${live.overshield}</b></span>
+      <span>STRUCT <b>${"◆".repeat(live.structure)}${"◇".repeat(Math.max(0, s.structureMax - live.structure))}</b> ${pp("structure")}</span>
+      <span>STRESS <b>${"◆".repeat(live.stress)}${"◇".repeat(Math.max(0, s.stressMax - live.stress))}</b> ${pp("stress")}</span>
+      <span>O.SHLD <b>${live.overshield}</b> ${pp("overshield")}</span>
     </div>
     <div class="ccpips">
       <span>EVA <b>${s.evasion}</b></span><span>E-DEF <b>${s.edef}</b></span>
       <span>ARMOR <b>${s.armor}</b></span><span>SAVE <b>${s.save}</b></span>
       <span>GRIT <b>+${s.attackBonus}</b></span>
     </div>`;
+
+  // HP / Heat / Repair / Core steppers — with structure & stress automation
   el.querySelectorAll(".pm[data-cc]").forEach((b) => {
     b.addEventListener("click", () => {
       const k = b.dataset.cc, d = Number(b.dataset.d);
       const maxes = { hp: s.hpMax, heat: s.heatMax, repairs: s.repMax, core: s.coreMax };
-      live[k] = Math.max(0, Math.min(maxes[k], live[k] + d));
-      renderCC(s);
+      if (k === "hp" && d < 0) {
+        if (live.overshield > 0) { live.overshield--; }       // overshield absorbs first
+        else if (live.hp > 0) {
+          live.hp--;
+          if (live.hp === 0) structureDamage();
+        }
+      } else if (k === "heat" && d > 0) {
+        if (live.heat >= s.heatMax) overheatDamage();
+        else live.heat++;
+      } else {
+        live[k] = Math.max(0, Math.min(maxes[k], live[k] + d));
+      }
+      onLiveChanged();
     });
   });
+
+  // Structure / Stress / Overshield manual steppers (no auto tables on manual edits)
+  el.querySelectorAll(".pp[data-pp]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const k = b.dataset.pp, d = Number(b.dataset.d);
+      const maxes = { structure: s.structureMax, stress: s.stressMax, overshield: 99 };
+      live[k] = Math.max(0, Math.min(maxes[k], live[k] + d));
+      onLiveChanged();
+    });
+  });
+
+  // CORE bar hover → core power tooltip
+  const coreRow = el.querySelector('.ccrow[data-key="core"]');
+  const ci = coreInfo(currentMech?.frame);
+  if (coreRow && ci) {
+    coreRow.style.cursor = "help";
+    coreRow.addEventListener("mouseenter", (e) =>
+      showTip(`CORE: ${ci.name}${ci.activation ? ` — ${ci.activation}` : ""}`, ci.description, e));
+    coreRow.addEventListener("mousemove", moveTooltip);
+    coreRow.addEventListener("mouseleave", hideTooltip);
+  }
+}
+
+// ---- reactor automation: structure & overheat ---------------------------------
+const macroOn = () => $("macro-toggle")?.checked || false;
+const d6 = () => 1 + Math.floor(Math.random() * 6);
+
+function structureDamage() {
+  const s = currentMech.stats;
+  live.structure = Math.max(0, live.structure - 1);
+  if (live.structure > 0) {
+    live.hp = s.hpMax; // HP refills after taking structure
+    logRoll({ kind: "sys", title: "STRUCTURE DAMAGE", detail: `Structure ${live.structure}/${s.structureMax} — HP resets to ${s.hpMax}.` });
+    if (macroOn()) rollStructureTable();
+  } else {
+    live.hp = 0;
+    logRoll({ kind: "sys", title: "STRUCTURE 0 — MECH DESTROYED", detail: "The frame comes apart." });
+    setStatus("STRUCTURE 0 — mech destroyed.", "status-err");
+  }
+}
+
+function overheatDamage() {
+  const s = currentMech.stats;
+  live.stress = Math.max(0, live.stress - 1);
+  live.heat = 0;
+  if (live.stress > 0) {
+    logRoll({ kind: "sys", title: "OVERHEAT", detail: `Reactor stress ${live.stress}/${s.stressMax} — heat clears to 0.` });
+    if (macroOn()) rollOverheatTable();
+  } else {
+    logRoll({ kind: "sys", title: "STRESS 0 — REACTOR MELTDOWN", detail: "Catastrophic reactor failure." });
+    setStatus("STRESS 0 — reactor meltdown.", "status-err");
+  }
+}
+
+// Paraphrased core-rules tables. Roll a d6; severity scales with what's left.
+function rollStructureTable() {
+  const v = d6();
+  let out;
+  if (v >= 5) out = "GLANCING BLOW — mech is IMPAIRED until the end of its next turn.";
+  else if (v >= 2) out = "SYSTEM TRAUMA — roll 1d6: 1–3 a weapon/mount is destroyed, 4–6 a system is destroyed.";
+  else out =
+    live.structure >= 3 ? "DIRECT HIT — mech is STUNNED until the end of its next turn."
+    : live.structure === 2 ? "DIRECT HIT — make a HULL check: success = STUNNED, failure = mech DESTROYED."
+    : "DIRECT HIT — mech is DESTROYED.";
+  postTableRoll("Structure check", v, out);
+}
+
+function rollOverheatTable() {
+  const v = d6();
+  let out;
+  if (v >= 5) out = "EMERGENCY SHUNT — mech is IMPAIRED until the end of its next turn.";
+  else if (v >= 2) out = "DESTABILIZED POWER PLANT — mech is EXPOSED (all damage doubled) until cleared.";
+  else out =
+    live.stress >= 2 ? "MELTDOWN — make an ENGINEERING check: failure = reactor meltdown imminent."
+    : "MELTDOWN — irreversible reactor meltdown.";
+  postTableRoll("Overheat check", v, out);
+}
+
+function postTableRoll(label, v, out) {
+  logRoll({ kind: "sys", title: `${label} → ${v}`, detail: out });
+  if (obrReady) {
+    try {
+      OBR.broadcast.sendMessage(CH_ROLL3D, {
+        who: myName, label, kind: "sys", detail: out, total: v, crit: "",
+        dice: [{ type: "d6", role: "normal", value: v }],
+      }, { destination: "REMOTE" });
+    } catch (_) {}
+  }
 }
 
 function renderStatGrid(s) {
@@ -299,7 +648,7 @@ function renderStatGrid(s) {
     ["E-Def", s.edef], ["Heat", `${live.heat}/${s.heatMax}`], ["Speed", s.speed],
     ["Sensors", s.sensors], ["Save", s.save], ["Size", s.size],
     ["Structure", `${live.structure}/${s.structureMax}`], ["Stress", `${live.stress}/${s.stressMax}`], ["Repair", `${live.repairs}/${s.repMax}`],
-    ["Tech Atk", sign(s.techAttack)], ["Grit", sign(s.attackBonus)], ["Core", s.coreMax],
+    ["Tech Atk", sign(s.techAttack)], ["Grit", sign(s.attackBonus)], ["O.Shield", live.overshield],
   ];
   $("statgrid").innerHTML = stats
     .map(([k, v]) => `<div class="stat"><div class="v">${v}</div><div class="k">${k}</div></div>`)
@@ -318,7 +667,6 @@ function rangeBits(w) {
   return bits.join(" · ") || "—";
 }
 
-// Map a weapon's range data to the template it should arm.
 function weaponTemplateSpec(w) {
   if (w.blast > 0) return { shape: "blast", size: w.blast, name: `${w.name} · Blast ${w.blast}` };
   if (w.cone > 0) return { shape: "cone", size: w.cone, name: `${w.name} · Cone ${w.cone}` };
@@ -362,14 +710,19 @@ function weaponCard(w) {
   const tmplBtn = spec
     ? `<button class="btn small ghost" data-act="tmpl" title="Arm ${spec.name} template">◈</button>`
     : "";
+  // Superheavy weapons fire as a Barrage (Full Action); everything else
+  // can Skirmish (Quick Action).
+  const isFull = /superheavy/i.test(w.mountSize || "");
+  const actIcon = isFull ? ICON_FULL : ICON_QUICK;
+  const actTitle = isFull ? "Full action (Barrage)" : "Quick action (Skirmish)";
   el.innerHTML = `
     <div class="top">
-      <span class="wname">${w.name}</span>
+      <span class="wname" data-act="info" title="${actTitle} — hover for weapon details">${actIcon}${w.name}</span>
       <span>
         ${tmplBtn}
         <button class="btn small" data-act="atk" title="Attack roll: d20 + grit">ATK</button>
         <button class="btn small lock" data-act="lock" title="Target lock: roll accuracy, then FIRE for damage">⬢</button>
-        <button class="btn small ghost" data-act="dmg" title="Damage roll only">DMG</button>
+        <button class="btn small ghost" data-act="dmg" title="Damage roll only (no grit — grit is attack-only)">DMG</button>
       </span>
     </div>
     <div class="meta">${[w.mountSize, w.type].filter(Boolean).join(" ")} — ${rangeBits(w)} — <b>${w.damage}</b></div>
@@ -377,7 +730,17 @@ function weaponCard(w) {
   `;
   el.querySelector('[data-act="atk"]').addEventListener("click", () => prepareWeaponAttack(w, false));
   el.querySelector('[data-act="lock"]').addEventListener("click", () => prepareWeaponAttack(w, true));
-  el.querySelector('[data-act="dmg"]').addEventListener("click", () => prepareWeaponDamage(w, false));
+  el.querySelector('[data-act="dmg"]').addEventListener("click", () => prepareWeaponDamage(w, false, false));
+  // hover the weapon name → full tooltip
+  const nameEl = el.querySelector('[data-act="info"]');
+  const body = [
+    `${[w.mountSize, w.type].filter(Boolean).join(" ")} — ${rangeBits(w)} — ${w.damage}`,
+    w.tagNames?.length ? `TAGS: ${w.tagNames.join(", ")}` : "",
+    w.effect || "",
+  ].filter(Boolean).join("  •  ");
+  nameEl.addEventListener("mouseenter", (e) => showTip(`${w.name} — ${actTitle}`, body, e));
+  nameEl.addEventListener("mousemove", moveTooltip);
+  nameEl.addEventListener("mouseleave", hideTooltip);
   if (spec) {
     el.querySelector('[data-act="tmpl"]').addEventListener("click", async () => {
       try {
@@ -391,26 +754,58 @@ function weaponCard(w) {
   return el;
 }
 
-// ---- tech attack card (blue) ---------------------------------------------------
+// ---- tech attack card + invade options ------------------------------------------
 function renderTechCard(s) {
   const el = $("techcard");
   const sign = s.techAttack >= 0 ? `+${s.techAttack}` : `${s.techAttack}`;
   el.innerHTML = `
     <div class="weapon techw" style="margin-bottom:0">
       <div class="top">
-        <span class="wname">TECH ATTACK</span>
+        <span class="wname" title="Quick action (Quick Tech)">${ICON_QUICK}TECH ATTACK</span>
         <span>
           <button class="btn small blue" data-act="tatk" title="Tech attack: d20 ${sign}">TECH ATK</button>
           <button class="btn small lock blue" data-act="tlock" title="Roll tech accuracy with the lock flow">⬢</button>
         </span>
       </div>
-      <div class="meta">d20 ${sign} vs E-DEF — Sensors ${s.sensors} — invade, fragment signal, etc.</div>
+      <div class="meta">d20 ${sign} vs E-DEF — Sensors ${s.sensors}</div>
     </div>`;
   el.querySelector('[data-act="tatk"]').addEventListener("click", () => prepareTechAttack());
   el.querySelector('[data-act="tlock"]').addEventListener("click", () => prepareTechAttack());
 }
 
-// ---- systems + hover tooltip -----------------------------------------------------
+// Core quick-tech options every mech has, plus any Invade options granted by
+// installed systems. Hover for the rules text; click to roll the tech attack.
+const INVADE_BASE = [
+  { name: "Invade — Fragment Signal", activation: "Quick Tech", detail: "Tech attack vs E-Defense. On hit: the target takes 2 Heat and is IMPAIRED and SLOWED until the end of its next turn." },
+  { name: "Scan", activation: "Quick Tech", detail: "Choose a character within Sensors: view its full stat block, hidden information (e.g. one piece of GM knowledge), or its last known orders. No attack roll needed." },
+  { name: "Lock On", activation: "Quick Tech", detail: "Choose a character within Sensors and line of sight: it gains LOCK ON. Any attacker may consume LOCK ON for +1 Accuracy on an attack against it. No attack roll needed." },
+];
+
+function renderInvades(m) {
+  const wrap = $("invades");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  const sysInvades = [];
+  for (const sys of m.systems) {
+    for (const a of sys.actionsFull || []) {
+      if (/invade/i.test(a.activation || "")) {
+        sysInvades.push({ name: `Invade — ${a.name}`, activation: "Quick Tech (Invade)", detail: a.detail || sys.description || "" });
+      }
+    }
+  }
+  [...INVADE_BASE, ...sysInvades].forEach((opt) => {
+    const div = document.createElement("div");
+    div.className = "system invade";
+    div.textContent = opt.name;
+    div.addEventListener("mouseenter", (e) => showTip(`${opt.name} — ${opt.activation}`, opt.detail, e));
+    div.addEventListener("mousemove", moveTooltip);
+    div.addEventListener("mouseleave", hideTooltip);
+    div.addEventListener("click", () => prepareTechAttack(opt.name.toUpperCase()));
+    wrap.appendChild(div);
+  });
+}
+
+// ---- systems + talents (hover tooltips) -------------------------------------------
 function renderSystems(m) {
   const wrap = $("systems");
   wrap.innerHTML = "";
@@ -422,20 +817,43 @@ function renderSystems(m) {
     const div = document.createElement("div");
     div.className = "system";
     div.textContent = sys.name;
-    div.addEventListener("mouseenter", (e) => showTooltip(sys, e));
-    div.addEventListener("mousemove", (e) => moveTooltip(e));
+    const bits = [];
+    if (sys.activation) bits.push(sys.activation.toUpperCase());
+    if (sys.sp != null) bits.push(`${sys.sp} SP`);
+    div.addEventListener("mouseenter", (e) =>
+      showTip(`${sys.name}${bits.length ? " — " + bits.join(" · ") : ""}`, sys.description || "No description in compendium.", e));
+    div.addEventListener("mousemove", moveTooltip);
     div.addEventListener("mouseleave", hideTooltip);
     wrap.appendChild(div);
   });
 }
 
+function renderTalentChips() {
+  const wrap = $("talents");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  const talents = resolveTalents(currentPilot?.talents || []);
+  if (!talents.length) {
+    wrap.innerHTML = `<div class="muted">No talents in this export (or compendium offline).</div>`;
+    return;
+  }
+  talents.forEach((t) => {
+    const div = document.createElement("div");
+    div.className = "system talent";
+    div.textContent = `${t.name} ${"I".repeat(Math.max(1, Math.min(3, t.rank)))}`;
+    div.addEventListener("mouseenter", (e) =>
+      showTip(`${t.name} — RANK ${t.rank}`, t.description || "No description in compendium.", e));
+    div.addEventListener("mousemove", moveTooltip);
+    div.addEventListener("mouseleave", hideTooltip);
+    wrap.appendChild(div);
+  });
+}
+
+// ---- tooltip --------------------------------------------------------------------
 const tipEl = $("tooltip");
-function showTooltip(sys, ev) {
-  const bits = [];
-  if (sys.activation) bits.push(sys.activation.toUpperCase());
-  if (sys.sp != null) bits.push(`${sys.sp} SP`);
-  $("tt-head").textContent = `${sys.name}${bits.length ? " — " + bits.join(" · ") : ""}`;
-  $("tt-body").textContent = sys.description || "No description in compendium.";
+function showTip(head, body, ev) {
+  $("tt-head").textContent = head;
+  $("tt-body").textContent = body || "";
   tipEl.style.display = "block";
   moveTooltip(ev);
 }
@@ -451,24 +869,23 @@ function moveTooltip(ev) {
 function hideTooltip() { tipEl.style.display = "none"; }
 
 // ============================================================== DICE SYSTEM ====
-// One unified flow. Everything — picker buttons, weapon ATK / DMG, the ⬢
-// target-lock → FIRE chain, tech attacks — loads dice into the same 3D tray
-// and resolves through the same math + broadcast path.
-
 let diceTray = null;
 let diceInit = false;
 let diceBusy = false;
 
 // What's queued in the tray, parallel to the tray's internal dice order.
-// { type, role, as } — `as: "d3"` marks a d6 being read as a d3 (ceil(v/2)).
+// { type, role, as, pair } — as:"d3" reads a d6 as ceil(v/2); dice sharing a
+// `pair` id are crit pairs: only the highest of the pair counts.
 let trayQueue = [];
+let pairSeq = 0;
 
-// Pending roll context: how to label/compute the current tray contents.
-// kind: "atk" | "dmg" | "tech" | "free"; followUp: weapon for the FIRE stage.
-let pending = { label: "", kind: "free", followUp: null };
+// Pending roll context. kind: "atk" | "dmg" | "tech" | "free".
+// followUp = weapon for the FIRE stage; crit = last accuracy roll crit.
+let pending = { label: "", kind: "free", followUp: null, crit: false };
+let pendingHeat = 0;
 
 function setContext(label, kind = "free", followUp = null) {
-  pending = { label, kind, followUp };
+  pending = { label, kind, followUp, crit: false };
   const el = $("roll-context");
   el.textContent = label;
   el.classList.toggle("tech", kind === "tech");
@@ -495,10 +912,13 @@ async function ensureDiceTray() {
         o.textContent = mod.SCHEMES[key].label || key;
         sel.appendChild(o);
       }
+      const savedScheme = readStore().scheme;
+      if (savedScheme && mod.SCHEMES[savedScheme]) sel.value = savedScheme;
+      sel.addEventListener("change", saveState);
     }
     diceTray = mod.createDiceTray($("dicetray"), {
       scheme: () => $("scheme")?.value || "union",
-      height: 250,
+      height: 270,
     });
     window.__computeResult = mod.computeResult;
     diceTray.resize();
@@ -511,12 +931,12 @@ async function ensureDiceTray() {
   return diceTray;
 }
 
-function addQueued(type, role = "normal", as = null) {
+function addQueued(type, role = "normal", as = null, pair = null) {
   if (!diceTray || diceBusy) return;
   diceTray.addDie(type, role);
-  trayQueue.push({ type, role, as });
+  trayQueue.push({ type, role, as, pair });
   diceTray.resetCamera();
-  hideResult(); // a fresh queue means the last result no longer matches
+  hideResult();
   updateAdvCount();
 }
 
@@ -527,7 +947,6 @@ function clearTrayAll() {
   updateAdvCount();
 }
 
-// picker
 document.querySelectorAll(".die-btn[data-die]").forEach((btn) => {
   btn.addEventListener("click", async () => {
     await ensureDiceTray();
@@ -543,7 +962,6 @@ $("cleardice")?.addEventListener("click", () => {
   diceTray?.resetCamera();
 });
 
-// flat modifier stepper
 const flatInput = $("flat-input");
 $("flat-minus")?.addEventListener("click", () => { flatInput.value = String((Number(flatInput.value) || 0) - 1); });
 $("flat-plus")?.addEventListener("click", () => { flatInput.value = String((Number(flatInput.value) || 0) + 1); });
@@ -563,8 +981,7 @@ function showResult({ total, sub, kind = "atk", crit = "" }) {
   $("result-sub").textContent = sub || "";
   $("result-crit").textContent = crit;
   const card = $("resultcard");
-  card.className = ""; // reset
-  card.id = "resultcard";
+  card.classList.remove("dmg", "tech");
   if (kind === "dmg") card.classList.add("dmg");
   if (kind === "tech") card.classList.add("tech");
   $("resultbox").classList.add("show");
@@ -572,6 +989,7 @@ function showResult({ total, sub, kind = "atk", crit = "" }) {
 function hideResult() {
   $("resultbox").classList.remove("show");
   $("firebtn").classList.remove("show");
+  $("heatapply").classList.remove("show");
 }
 $("resultclear")?.addEventListener("click", () => {
   hideResult();
@@ -580,8 +998,19 @@ $("resultclear")?.addEventListener("click", () => {
   diceTray?.resetCamera();
 });
 
-// ---- roll preparation (weapon / tech flows) -------------------------------------
+// heat auto-apply (Overkill)
+$("heatapply")?.addEventListener("click", () => {
+  if (!pendingHeat || !currentMech || !live) return;
+  const s = currentMech.stats;
+  if (live.heat + pendingHeat > s.heatMax) overheatDamage();
+  else live.heat += pendingHeat;
+  onLiveChanged();
+  setStatus(`Applied +${pendingHeat} Heat (now ${live.heat}/${s.heatMax}).`, "status-ok");
+  pendingHeat = 0;
+  $("heatapply").classList.remove("show");
+});
 
+// ---- roll preparation (weapon / tech flows) -------------------------------------
 function parseDamage(str) {
   const dice = [];
   let flat = 0;
@@ -596,8 +1025,7 @@ function parseDamage(str) {
   return { dice, flat };
 }
 
-// ATK (or ⬢ target lock): d20 + grit, ready to roll. Lock keeps the weapon
-// around so the FIRE button can chain straight into its damage.
+// ATK (or ⬢ target lock): d20 + grit, ready to roll.
 async function prepareWeaponAttack(w, lock) {
   switchToDiceTab();
   if (!(await ensureDiceTray())) return;
@@ -615,9 +1043,9 @@ async function prepareWeaponAttack(w, lock) {
   );
 }
 
-// DMG: the weapon's damage dice (+ overkill if tagged). `fire=true` adds grit
-// (this table's house rule for the FIRE chain) and auto-rolls.
-async function prepareWeaponDamage(w, fire) {
+// DMG: the weapon's damage dice only — grit is NEVER added to damage.
+// crit=true doubles every die; each pair keeps only its highest result.
+async function prepareWeaponDamage(w, fire, crit) {
   switchToDiceTab();
   if (!(await ensureDiceTray())) return;
   if (diceBusy) return;
@@ -628,29 +1056,36 @@ async function prepareWeaponDamage(w, fire) {
   }
   clearTrayAll();
   hideResult();
-  const grit = currentPilot ? currentPilot.grit : 0;
-  setFlat(parsed.flat + (fire ? grit : 0));
+  setFlat(parsed.flat);
   setOverkill(!!w.overkill);
+  const queueOne = (faces, pair) => {
+    if (faces === 3) addQueued("d6", "normal", "d3", pair);
+    else if ([4, 6, 8, 10, 12, 20].includes(faces)) addQueued(`d${faces}`, "normal", null, pair);
+    else addQueued("d6", "normal", null, pair); // unknown faces — approximate
+  };
   for (const g of parsed.dice) {
     for (let i = 0; i < g.n; i++) {
-      if (g.faces === 3) addQueued("d6", "normal", "d3");      // d3 = d6 read as ceil(v/2)
-      else if (g.faces === 20 || g.faces === 12 || g.faces === 10 || g.faces === 8 || g.faces === 6 || g.faces === 4) addQueued(`d${g.faces}`, "normal");
-      else addQueued("d6", "normal"); // unknown faces — approximate with d6
+      if (crit) {
+        const pid = ++pairSeq;
+        queueOne(g.faces, pid);
+        queueOne(g.faces, pid);
+      } else {
+        queueOne(g.faces, null);
+      }
     }
   }
   setContext(
-    `${w.name.toUpperCase()} — DAMAGE · ${w.damage}${fire ? ` +${grit} GRIT` : ""}${w.overkill ? " · OVERKILL" : ""}`,
+    `${w.name.toUpperCase()} — DAMAGE · ${w.damage}${crit ? " · CRIT (dice doubled, keep highest)" : ""}${w.overkill ? " · OVERKILL" : ""}`,
     "dmg",
     null
   );
   if (fire) {
-    // brief hover so the dice are seen falling in, then send it
-    setTimeout(() => doRoll(), 650);
+    setTimeout(() => doRoll(), 650); // let the dice hover in before the throw
   }
 }
 
 // Blue flow: tech attack = d20 + tech attack bonus.
-async function prepareTechAttack() {
+async function prepareTechAttack(label = "TECH ATTACK") {
   switchToDiceTab();
   if (!(await ensureDiceTray())) return;
   if (diceBusy) return;
@@ -660,7 +1095,7 @@ async function prepareTechAttack() {
   setFlat(t);
   setOverkill(false);
   addQueued("d20", "normal");
-  setContext(`TECH ATTACK · d20 ${t >= 0 ? "+" : ""}${t} vs E-DEF`, "tech", null);
+  setContext(`${label} · d20 ${t >= 0 ? "+" : ""}${t} vs E-DEF`, "tech", null);
 }
 
 // FIRE: chains the locked weapon's damage right after its accuracy roll.
@@ -668,12 +1103,10 @@ $("firebtn")?.addEventListener("click", () => {
   const w = pending.followUp;
   if (!w) return;
   $("firebtn").classList.remove("show");
-  prepareWeaponDamage(w, true);
+  prepareWeaponDamage(w, true, pending.crit);
 });
 
 // ---- THE roll -------------------------------------------------------------------
-
-// effective value of a die (d3s are d6s halved)
 const effVal = (meta, v) => (meta?.as === "d3" ? Math.ceil(v / 2) : v);
 
 async function doRoll() {
@@ -691,8 +1124,23 @@ async function doRoll() {
     if (!raw || !raw.length) return;
     let metas = trayQueue.slice();
 
-    // ---- Overkill: every damage die showing (effective) 1 explodes into a
-    // bonus die of the same kind; +1 Heat per 1. Chains, capped for sanity.
+    // ---- crit pairs: keep only the highest die of each pair
+    const eff0 = raw.map((r, i) => ({ ...r, value: effVal(metas[i], r.value) }));
+    const dropIdx = new Set();
+    const pairBest = new Map(); // pair -> { idx, val }
+    eff0.forEach((d, i) => {
+      const p = metas[i]?.pair;
+      if (p == null || d.role !== "normal") return;
+      const cur = pairBest.get(p);
+      if (!cur || d.value > cur.val) {
+        if (cur) dropIdx.add(cur.idx);
+        pairBest.set(p, { idx: i, val: d.value });
+      } else {
+        dropIdx.add(i);
+      }
+    });
+
+    // ---- Overkill: kept damage dice showing 1 explode; +1 Heat per 1
     let heat = 0;
     if (overkill) {
       let iter = 0;
@@ -700,6 +1148,7 @@ async function doRoll() {
       while (iter < 8) {
         const ones = [];
         for (let i = scanFrom; i < raw.length; i++) {
+          if (dropIdx.has(i)) continue;
           const r = raw[i], meta = metas[i];
           if (r.role === "normal" && r.type !== "d20" && effVal(meta, r.value) === 1) {
             ones.push({ type: r.type, as: meta?.as || null });
@@ -710,32 +1159,35 @@ async function doRoll() {
         scanFrom = raw.length;
         const extra = await diceTray.rollExtra(ones.map((o) => o.type));
         if (!extra || !extra.length) break;
-        ones.forEach((o) => metas.push({ type: o.type, role: "normal", as: o.as }));
+        ones.forEach((o) => metas.push({ type: o.type, role: "normal", as: o.as, pair: null }));
         raw = raw.concat(extra);
         trayQueue = metas.slice();
         iter++;
       }
     }
 
-    // ---- compute the Lancer total
+    // ---- compute the Lancer total (paired drops excluded)
     const eff = raw.map((r, i) => ({ ...r, value: effVal(metas[i], r.value) }));
+    const effKept = eff.filter((_, i) => !dropIdx.has(i));
     const compute = window.__computeResult;
-    const res = compute(eff, { keepHighest, flat });
+    const res = compute(effKept, { keepHighest, flat });
 
     // crit & labels (Lancer: an attack totalling 20+ crits; nat 1 always whiffs)
     let critTxt = "";
+    let isCrit = false;
     if (res.d20 != null) {
-      if (res.d20 === 20) critTxt = "⚡ NAT 20 — CRIT";
+      if (res.d20 === 20) { critTxt = "⚡ NAT 20 — CRIT"; isCrit = true; }
       else if (res.d20 === 1) critTxt = "✘ NAT 1";
-      else if ((ctx.kind === "atk" || ctx.kind === "tech") && res.total >= 20) critTxt = "⚡ CRIT (20+)";
+      else if ((ctx.kind === "atk" || ctx.kind === "tech") && res.total >= 20) { critTxt = "⚡ CRIT (20+)"; isCrit = true; }
     }
 
     const facesTxt = eff.map((d, i) => {
       const tag = d.role === "acc" ? "+acc" : d.role === "dis" ? "−dif" : "";
       const dieName = metas[i]?.as || d.type;
-      return `${dieName}${tag ? ` ${tag}` : ""}:${d.value}`;
+      return `${dieName}${tag ? ` ${tag}` : ""}:${d.value}${dropIdx.has(i) ? "✗" : ""}`;
     }).join("  ");
     let detail = facesTxt;
+    if (dropIdx.size) detail += `  | crit: paired dice, ✗ dropped`;
     if (res.accApplied) detail += `  | ${res.accApplied > 0 ? "+" : ""}${res.accApplied} ${res.accApplied > 0 ? "accuracy" : "difficulty"}`;
     if (flat) detail += `  | ${flat >= 0 ? "+" : ""}${flat} flat`;
     if (heat) detail += `  | +${heat} HEAT (overkill)`;
@@ -744,15 +1196,23 @@ async function doRoll() {
     const kind = ctx.kind === "free" ? (res.d20 != null ? "atk" : "dmg") : ctx.kind;
     const priv = rollsHidden();
 
-    // ---- present: zoom the camera in and pop the result top-left
+    // ---- present: zoom in, pop the result, surface FIRE / heat-apply buttons
     diceTray.zoomToDice();
     const sub = ctx.kind === "dmg" ? "DAMAGE" : ctx.kind === "tech" ? "TECH" : (res.d20 != null ? "ACCURACY" : "TOTAL");
-    showResult({ total: res.total, sub, kind, crit: critTxt + (heat ? `  +${heat} HEAT` : "") });
+    showResult({ total: res.total, sub, kind, crit: critTxt });
 
-    // FIRE stage available?
     if (ctx.followUp) {
-      pending.followUp = ctx.followUp; // keep the weapon for the FIRE click
+      pending.followUp = ctx.followUp;
+      pending.crit = isCrit;
       $("firebtn").classList.add("show");
+      if (isCrit) $("firebtn").textContent = "⬢ FIRE (CRIT)";
+      else $("firebtn").textContent = "⬢ FIRE";
+    }
+    if (heat > 0 && currentMech) {
+      pendingHeat = heat;
+      const hb = $("heatapply");
+      hb.textContent = `+${heat} HEAT`;
+      hb.classList.add("show");
     }
 
     logRoll({ kind, title: `${label} → ${res.total}`, detail, critTxt: critTxt ? `<span class="crit"> ${critTxt}</span>` : "", priv });
@@ -771,7 +1231,7 @@ async function doRoll() {
           },
           { destination: "REMOTE" }
         );
-      } catch (_) { /* OBR not ready — local-only is fine */ }
+      } catch (_) {}
     }
   } catch (e) {
     console.warn("[LANCER//UPLINK] dice roll failed", e);
@@ -783,14 +1243,12 @@ async function doRoll() {
 }
 $("rolldice")?.addEventListener("click", doRoll);
 
-// ---- remote replays --------------------------------------------------------------
-// Someone else rolled: replay their physical dice in our tray (forced to land
-// on their real values), flash their result, then tidy up after a few seconds.
+// ---- remote replays ----------------------------------------------------------------
 let remoteCleanup = 0;
 
 async function onRemoteRoll(d) {
   logRoll({
-    kind: d.kind === "dmg" ? "dmg" : d.kind === "tech" ? "tech" : "atk",
+    kind: d.kind === "dmg" ? "dmg" : d.kind === "tech" ? "tech" : d.kind === "sys" ? "sys" : "atk",
     remote: true,
     who: d.who,
     title: `${d.label} → ${d.total}`,
@@ -799,7 +1257,6 @@ async function onRemoteRoll(d) {
   });
   try { OBR.notification.show(`${d.who}: ${d.label} → ${d.total}`, "INFO"); } catch (_) {}
 
-  // replay only if the dice tab is up and we're not mid-roll ourselves
   if (!diceTabActive()) return;
   await ensureDiceTray();
   if (!diceTray || diceBusy || diceTray.isRolling()) return;
@@ -808,16 +1265,15 @@ async function onRemoteRoll(d) {
   const banner = $("remote-banner");
   banner.textContent = `▸ ${d.who} ROLLS…`;
   banner.style.display = "block";
-  trayQueue = []; // replay owns the tray now
+  trayQueue = []; // the replay owns the tray now
   await diceTray.replay(d.dice || []);
   diceTray.zoomToDice();
   showResult({
     total: d.total,
-    sub: `${d.who} — ${d.kind === "dmg" ? "DAMAGE" : d.kind === "tech" ? "TECH" : "ACCURACY"}`,
-    kind: d.kind || "atk",
+    sub: `${d.who} — ${d.kind === "dmg" ? "DAMAGE" : d.kind === "tech" ? "TECH" : d.kind === "sys" ? "CHECK" : "ACCURACY"}`,
+    kind: d.kind === "sys" ? "atk" : d.kind || "atk",
     crit: d.crit || "",
   });
-  // visible "for a few seconds after the result", then clean up
   remoteCleanup = setTimeout(() => {
     if (diceBusy || diceTray.isRolling()) return;
     diceTray.clearTray();
@@ -828,11 +1284,11 @@ async function onRemoteRoll(d) {
   }, 4500);
 }
 
-// ---- roll log ----------------------------------------------------------------------
+// ---- roll log -------------------------------------------------------------------------
 function logRoll({ kind, title, detail, critTxt = "", remote = false, who = "", priv = false }) {
   const log = $("rolllog");
   const div = document.createElement("div");
-  div.className = `roll ${kind === "dmg" ? "dmg" : ""} ${kind === "tech" ? "tech" : ""} ${remote ? "remote" : ""} ${priv ? "private" : ""}`.trim();
+  div.className = `roll ${kind === "dmg" ? "dmg" : ""} ${kind === "tech" ? "tech" : ""} ${kind === "sys" ? "sys" : ""} ${remote ? "remote" : ""} ${priv ? "private" : ""}`.trim();
   const badge = priv ? `<span class="private-badge"> · PRIVATE</span>` : "";
   div.innerHTML = `
     <div class="who">${remote ? who || "Table" : myName}${badge}</div>
@@ -843,14 +1299,60 @@ function logRoll({ kind, title, detail, critTxt = "", remote = false, who = "", 
 }
 $("clearlog")?.addEventListener("click", () => { $("rolllog").innerHTML = ""; });
 
-// ============================================================== OBR STARTUP ====
-async function refreshGridReadout() {
+// ============================================================ MAP TAB WIRING ====
+const visBtn = $("vis-toggle");
+function refreshVisBtn() {
+  const all = tool.getTemplateVisibility() === "all";
+  visBtn.textContent = all ? "👁 TEMPLATES: ALL PLAYERS" : "👁 TEMPLATES: ONLY ME";
+  visBtn.classList.toggle("all", all);
+}
+visBtn?.addEventListener("click", () => {
+  tool.setTemplateVisibility(tool.getTemplateVisibility() === "all" ? "me" : "all");
+  refreshVisBtn();
+  saveState();
+});
+
+$("clearmine")?.addEventListener("click", async () => {
+  try { await clearMyTemplates(); await clearLocalTemplates(); }
+  catch (e) { console.warn("[LANCER//UPLINK] clear templates failed", e); }
+});
+$("clearterrain")?.addEventListener("click", async () => {
+  try { await clearTerrain(); await renderTerrain([], hex.keyToHex); }
+  catch (e) { console.warn("[LANCER//UPLINK] clear terrain failed", e); }
+});
+$("clearranges")?.addEventListener("click", async () => {
+  try { await clearAllLocalOverlays(); } catch (_) {}
+  activeFields = {};
+  markMobilityActive();
+});
+
+$("square-toggle")?.addEventListener("change", () => {
+  hex.setSquareOverride($("square-toggle").checked ? true : null);
+  refreshGridReadout();
+  saveState();
+});
+$("macro-toggle")?.addEventListener("change", saveState);
+
+function refreshGridReadout() {
   const el = $("grid-readout");
   if (!el) return;
   const g = hex.grid;
-  el.textContent = g.isHexGrid
-    ? `HEX ${g.pointy ? "(pointy-top)" : "(flat-top)"} · DPI ${g.dpi} · R ${g.R.toFixed(1)}px`
-    : `Non-hex grid detected — hex math approximated.`;
+  if (!g.ready) { el.textContent = "Waiting for a scene…"; return; }
+  const mode = g.square ? "SQUARE (king-move ranges)" : `HEX ${g.pointy ? "(pointy-top)" : "(flat-top)"}`;
+  const src = g.squareOverride != null ? " · manual override" : ` · room reports ${g.isHexGrid ? "hex" : "square"}`;
+  el.textContent = `${mode} · DPI ${g.dpi}${src}`;
+}
+
+// ============================================================== OBR STARTUP ====
+async function recalibrate() {
+  try {
+    await hex.calibrate();
+    refreshGridReadout();
+  } catch (e) {
+    console.warn("[LANCER//UPLINK] calibration failed", e);
+    const el = $("grid-readout");
+    if (el) el.textContent = "Calibration failed — open a scene, then RE-PROBE.";
+  }
 }
 
 async function start() {
@@ -858,27 +1360,90 @@ async function start() {
   $("conn-dot")?.classList.add("on");
   try { myName = await OBR.player.getName(); } catch (_) {}
 
+  // 1) Register the template tool IMMEDIATELY — it must never wait on the
+  //    grid probe (this is what used to leave the toolbar empty).
   try {
-    await hex.calibrate();
     await tool.registerTool();
-    await refreshGridReadout();
   } catch (e) {
-    console.error("[LANCER//UPLINK] template tool setup failed", e);
+    console.error("[LANCER//UPLINK] template tool registration failed", e);
     setStatus("Template tool failed to register — check console.", "status-err");
   }
 
-  $("btn-recal")?.addEventListener("click", async () => {
-    try { await hex.calibrate(); await refreshGridReadout(); } catch (_) {}
-  });
+  // 2) Calibrate the grid when (and whenever) a scene is actually ready.
+  try {
+    if (await OBR.scene.isReady()) await recalibrate();
+    OBR.scene.onReadyChange((ready) => { if (ready) recalibrate(); });
+  } catch (e) {
+    console.warn("[LANCER//UPLINK] scene readiness check failed", e);
+  }
 
+  $("btn-recal")?.addEventListener("click", recalibrate);
+
+  // 3) Bonded-token follow: re-centre active range fields when it moves.
+  try {
+    OBR.scene.items.onChange((items) => {
+      if (!bond || !Object.keys(activeFields).length) return;
+      const it = items.find((i) => i.id === bond.id);
+      if (!it) return;
+      clearTimeout(followTimer);
+      followTimer = setTimeout(async () => {
+        const c = hex.pixelToHex(it.position);
+        for (const [kind, f] of Object.entries(activeFields)) {
+          await placeFieldAt(kind, c, f.size, f.boost);
+        }
+      }, 250);
+    });
+  } catch (_) {}
+
+  // 4) Broadcast channels: dice replays + squad telemetry.
   try {
     OBR.broadcast.onMessage(CH_ROLL3D, (event) => onRemoteRoll(event.data || {}));
+    OBR.broadcast.onMessage(CH_STATUS, (event) => {
+      const d = event.data || {};
+      if (d.type === "req") { broadcastStatus(); return; }
+      if (d.type === "status" && d.who) {
+        squad.set(d.who, d);
+        if (gmMode) renderGM();
+      }
+    });
   } catch (e) {
-    console.warn("[LANCER//UPLINK] roll channel unavailable", e);
+    console.warn("[LANCER//UPLINK] broadcast channels unavailable", e);
+  }
+
+  broadcastStatus();
+}
+
+// ============================================================== BOOT ==========
+(function restoreSettings() {
+  const st = readStore();
+  if (st.vis) tool.setTemplateVisibility(st.vis);
+  refreshVisBtn();
+  if ($("square-toggle")) {
+    $("square-toggle").checked = !!st.square;
+    hex.setSquareOverride(st.square ? true : null);
+  }
+  if ($("macro-toggle")) $("macro-toggle").checked = !!st.macro;
+  if (st.bond && st.bond.id) bond = st.bond;
+  updateBondUI();
+  if (st.live) restoreLive = st.live;
+  if (st.mechIdx != null) restoreMechIdx = st.mechIdx;
+})();
+
+async function tryRestorePilot() {
+  const st = readStore();
+  if (!st.pilot) return;
+  try {
+    setStatus("Restoring saved pilot…");
+    await importPilots([st.pilot], st.pilot);
+    setStatus(`Restored ${currentPilot?.callsign || "pilot"} from last session.`, "status-ok");
+  } catch (e) {
+    console.warn("[LANCER//UPLINK] pilot restore failed", e);
+    setStatus("Saved pilot could not be restored — upload the JSON again.", "status-err");
   }
 }
 
 setStatus("Ready. Upload a COMP/CON pilot export to begin.");
+tryRestorePilot();
 try {
   if (OBR.isReady) start();
   else OBR.onReady(start);

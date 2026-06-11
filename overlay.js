@@ -4,7 +4,7 @@
 // terrain are shared items everyone sees.
 
 import { OBR, buildPath, Command, META } from "./sdk.js";
-import { hexCorners, hexKey } from "./hex.js";
+import { hexCorners, hexKey, hexesInRange, hexDistance } from "./hex.js";
 
 const CMD = {
   MOVE: Command?.MOVE ?? 0,
@@ -12,13 +12,14 @@ const CMD = {
   CLOSE: Command?.CLOSE ?? 4,
 };
 
-// One subpath per hex; even-odd fill keeps shared edges crisp.
+// One subpath per cell; even-odd fill keeps shared edges crisp.
+// (Cells have 6 corners on hex grids, 4 on square grids.)
 export function hexSetCommands(hexes) {
   const cmds = [];
   for (const h of hexes) {
     const pts = hexCorners(h);
     cmds.push([CMD.MOVE, pts[0].x, pts[0].y]);
-    for (let i = 1; i < 6; i++) cmds.push([CMD.LINE, pts[i].x, pts[i].y]);
+    for (let i = 1; i < pts.length; i++) cmds.push([CMD.LINE, pts[i].x, pts[i].y]);
     cmds.push([CMD.CLOSE]);
   }
   return cmds;
@@ -78,6 +79,34 @@ export async function clearAllLocalOverlays() {
 
 export function activeLocalSlots() {
   return [...localIds.keys()];
+}
+
+export function hasLocalOverlay(slot) {
+  return localIds.has(slot);
+}
+
+// ---- boost field: double-radius movement with a visible inner boundary -------
+// Inner ring (0..n) = standard move, strongly drawn. Outer ring (n+1..2n) =
+// boost-only ground, fainter. Both are local — only you see them.
+
+export async function showBoostField(slotBase, center, n, opts = {}) {
+  const color = opts.color || "#5ad17a";
+  const name = opts.name || `Boost ${n}`;
+  const inner = hexesInRange(center, n, true);
+  const outer = hexesInRange(center, 2 * n, true).filter((h) => hexDistance(center, h) > n);
+  await showLocalOverlay(`${slotBase}-in`, inner, {
+    color, name: `${name} — move`, kind: "range",
+    fillOpacity: 0.24, strokeOpacity: 0.95, strokeWidth: 5,
+  });
+  await showLocalOverlay(`${slotBase}-out`, outer, {
+    color, name: `${name} — boost`, kind: "range",
+    fillOpacity: 0.10, strokeOpacity: 0.45, strokeWidth: 2,
+  });
+}
+
+export async function clearBoostField(slotBase) {
+  await clearLocalOverlay(`${slotBase}-in`);
+  await clearLocalOverlay(`${slotBase}-out`);
 }
 
 // ---- private (local) templates ----------------------------------------------

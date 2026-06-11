@@ -7,7 +7,7 @@ const DATA_SOURCES = [
   "https://unpkg.com/lancer-data/lib",
 ];
 
-const compendium = { frames: null, weapons: null, systems: null, loaded: false };
+const compendium = { frames: null, weapons: null, systems: null, talents: null, loaded: false };
 
 async function fetchJson(file) {
   for (const base of DATA_SOURCES) {
@@ -22,14 +22,16 @@ async function fetchJson(file) {
 export async function loadCompendium(onStatus) {
   if (compendium.loaded) return compendium;
   onStatus?.("Downloading compendium...");
-  const [frames, weapons, systems] = await Promise.all([
+  const [frames, weapons, systems, talents] = await Promise.all([
     fetchJson("frames.json"),
     fetchJson("weapons.json"),
     fetchJson("systems.json"),
+    fetchJson("talents.json"),
   ]);
   compendium.frames = frames || [];
   compendium.weapons = weapons || [];
   compendium.systems = systems || [];
+  compendium.talents = talents || [];
   compendium.loaded = !!(frames && weapons);
   onStatus?.(compendium.loaded ? "Compendium online." : "Compendium offline - manual mode available.");
   return compendium;
@@ -41,6 +43,8 @@ export const findWeapon = (id) =>
   compendium.weapons?.find((w) => w.id === id) || null;
 export const findSystem = (id) =>
   compendium.systems?.find((s) => s.id === id) || null;
+export const findTalent = (id) =>
+  compendium.talents?.find((t) => t.id === id) || null;
 
 // ---- pilot file parsing -----------------------------------------------------
 
@@ -157,6 +161,10 @@ export function parsePilot(p) {
       sys: Number(skills[2] ?? 0),
       eng: Number(skills[3] ?? 0),
     },
+    // COMP/CON talents: [{ id, rank }] (older exports may use bare ids)
+    talents: (p.talents || []).map((t) =>
+      typeof t === "string" ? { id: t, rank: 1 } : { id: t.id || "", rank: Number(t.rank ?? 1) }
+    ).filter((t) => t.id),
   };
 
   const mechs = (p.mechs || []).map((m) => {
@@ -199,12 +207,22 @@ export function resolveMech(mechRaw, pilot) {
   const { hull, agi, sys, eng } = pilot.hase;
   const grit = pilot.grit;
 
+  // Resolve systems first — some grant stat bonuses (e.g. Personalizations: +2 HP).
+  const systems = mechRaw.systems
+    .map((s) => resolveSystem(s))
+    .filter(Boolean)
+    .slice(0, 24);
+  const hasPersonalizations = systems.some(
+    (x) => (x.id || "").includes("personalizations") || /personalizations/i.test(x.name || "")
+  );
+  const hpBonus = hasPersonalizations ? 2 : 0;
+
   const stats = {
     frameName: frame
       ? `${frame.source || ""} ${frame.name || ""}`.trim()
       : mechRaw.frameId || "UNKNOWN FRAME",
     size: fs.size ?? 1,
-    hpMax: (fs.hp ?? 8) + grit + hull * 2,
+    hpMax: (fs.hp ?? 8) + grit + hull * 2 + hpBonus,
     armor: fs.armor ?? 0,
     structureMax: fs.structure ?? 4,
     stressMax: fs.stress ?? 4,
@@ -224,11 +242,6 @@ export function resolveMech(mechRaw, pilot) {
     label: mt.type ? `${mt.type.toUpperCase()} MOUNT` : `MOUNT ${i + 1}`,
     weapons: mt.weapons.map(resolveWeapon).filter(Boolean),
   }));
-
-  const systems = mechRaw.systems
-    .map((s) => resolveSystem(s))
-    .filter(Boolean)
-    .slice(0, 24);
 
   return { name: mechRaw.name, stats, mounts, systems, current: mechRaw.current, frame };
 }
@@ -270,6 +283,48 @@ export function resolveSystem(ref) {
     sp: data.sp ?? null,
     activation,
     description,
+    // full action list, so Invade options granted by systems can be surfaced
+    actionsFull: acts.map((a) => ({
+      name: a.name || data.name || fallbackName,
+      activation: String(a.activation || "").trim(),
+      detail: effectText(a.detail || a.description || ""),
+    })),
+  };
+}
+
+// ---- talents ------------------------------------------------------------------
+// pilotTalents: [{ id, rank }] → [{ id, name, rank, description }]
+export function resolveTalents(pilotTalents) {
+  return (pilotTalents || []).map((t) => {
+    const data = findTalent(t.id);
+    const fallbackName = (t.id || "").replace(/^t_/, "").replace(/_/g, " ") || "Talent";
+    if (!data) return { id: t.id, name: fallbackName, rank: t.rank, description: "" };
+    const ranks = Array.isArray(data.ranks) ? data.ranks : [];
+    const owned = ranks.slice(0, Math.max(1, t.rank));
+    const description = owned
+      .map((r, i) => `${"I".repeat(i + 1)} — ${r.name || ""}: ${effectText(r.description || r.effect || "")}`)
+      .join("  •  ");
+    return { id: t.id, name: data.name || fallbackName, rank: t.rank, description };
+  });
+}
+
+// ---- frame core system ----------------------------------------------------------
+// Returns { name, activation, description } for the CORE bar tooltip.
+export function coreInfo(frame) {
+  const c = frame?.core_system;
+  if (!c) return null;
+  const bits = [];
+  if (c.passive_name || c.passive_effect) {
+    bits.push(`PASSIVE${c.passive_name ? ` (${c.passive_name})` : ""}: ${effectText(c.passive_effect || "")}`);
+  }
+  if (c.active_name || c.active_effect) {
+    bits.push(`ACTIVE${c.active_name ? ` (${c.active_name})` : ""}: ${effectText(c.active_effect || "")}`);
+  }
+  if (!bits.length && c.description) bits.push(effectText(c.description));
+  return {
+    name: c.name || "Core System",
+    activation: c.activation || "",
+    description: bits.join("  •  ") || effectText(c.description || ""),
   };
 }
 
@@ -305,11 +360,24 @@ export function resolveWeapon(ref) {
     .map((d) => `${d.val ?? d.override ?? "?"} ${String(d.type || "").slice(0, 3)}`)
     .join(" + ") || "-";
   const tags = (w.tags || []).map((t) => t.id || t);
+  // human-readable tag names for the hover tooltip
+  const tagNames = tags.map((t) =>
+    String(t).replace(/^tg_/, "").replace(/_/g, " ").toUpperCase()
+  );
+  const effect = [
+    effectText(w.effect),
+    w.on_attack ? `ON ATTACK: ${effectText(w.on_attack)}` : "",
+    w.on_hit ? `ON HIT: ${effectText(w.on_hit)}` : "",
+    w.on_crit ? `ON CRIT: ${effectText(w.on_crit)}` : "",
+    effectText(w.description),
+  ].filter(Boolean).join("  •  ");
   return {
     id, name: w.name, mountSize: w.mount, type: w.type,
     range, threat, blast, cone, line, burst, damage,
     overkill: tags.includes("tg_overkill"),
     loading: tags.includes("tg_loading"),
+    tagNames,
+    effect,
     icon: weaponIcon(w),
   };
 }

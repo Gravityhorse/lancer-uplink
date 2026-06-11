@@ -40,6 +40,7 @@ import {
   toggleTerrainHex,
   removeTerrainHex,
   renderTerrain,
+  showBoostField,
 } from "./overlay.js";
 
 const TOOL = `${ID}/tool`;
@@ -97,12 +98,19 @@ async function placeTemplate(shape, hexes, name) {
 }
 
 // ---- armed (mech-sheet) state -------------------------------------------------
-// { shape, size, name }
+// { shape, size, name, boost } — boost makes a click place a double-radius
+// movement field with a visible boundary at the standard-move edge.
 let armed = null;
+let boostSeq = 0;
 
 export async function armTemplate(spec) {
   if (!spec || !MODES[spec.shape]) return;
-  armed = { shape: spec.shape, size: Math.max(0, spec.size | 0), name: spec.name || LABELS[spec.shape] };
+  armed = {
+    shape: spec.shape,
+    size: Math.max(0, spec.size | 0),
+    name: spec.name || LABELS[spec.shape],
+    boost: !!spec.boost,
+  };
   await activateMode(spec.shape);
   return armed;
 }
@@ -156,7 +164,8 @@ function circleMode(shape, icon) {
     async onToolMove(_ctx, ev) {
       if (!isArmed(shape)) return clearPreview();
       const h = pixelToHex(ev.pointerPosition);
-      await setPreview(hexesInRange(h, armed.size, true), color);
+      const r = armed.boost ? armed.size * 2 : armed.size;
+      await setPreview(hexesInRange(h, r, true), color);
     },
 
     async onToolClick(_ctx, ev) {
@@ -164,8 +173,13 @@ function circleMode(shape, icon) {
       const h = pixelToHex(ev.pointerPosition);
       const n = armed.size;
       const name = armed.name;
+      const boost = armed.boost;
       await clearPreview();
-      await placeTemplate(shape, hexesInRange(h, n, true), name);
+      if (boost) {
+        await showBoostField(`tool-boost-${++boostSeq}`, h, n, { color, name });
+      } else {
+        await placeTemplate(shape, hexesInRange(h, n, true), name);
+      }
       disarm();
     },
 
