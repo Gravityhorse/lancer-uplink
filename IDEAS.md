@@ -3,6 +3,15 @@
 Things that would make this tool genuinely great, roughly ordered by
 bang-for-buck.
 
+## Shipped in 2.8.1 ✓
+
+- ✓ EVA / SAVE / SENS quick-edit steppers right on each NPC card
+- ✓ Tap/click pins the lavender tooltip (mobile-friendly) with a dark-purple ✕
+  to dismiss — hover behaviour untouched
+- ✓ Squad Telemetry kick: blue ✕ on each lancer card, SURE? confirm, removes
+  that one mech from every player's squad view (they rejoin automatically on
+  their next status update)
+
 ## Shipped in 2.8.0 ✓
 
 - ✓ Range fields follow the token only when it ACTUALLY moves — drag offsets

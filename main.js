@@ -195,6 +195,7 @@ function renderGM() {
     card.className = `lancer-card${now - (e.ts || 0) > 60000 ? " lc-stale" : ""}`;
     card.title = e.bondId ? "Click to locate this lancer's token on the map" : "";
     card.innerHTML = `
+      <button class="lc-kick" title="Remove this lancer from everyone's Squad Telemetry (they can rejoin any time)">✕</button>
       <div class="lc-head">
         <span class="lc-callsign">${softWrap(e.callsign) || "PILOT"}</span>
         <div class="lc-sub">
@@ -222,6 +223,28 @@ function renderGM() {
         </div>
       </div>`;
     if (e.bondId) card.addEventListener("click", () => pingToken(e.bondId)); // GM click-to-ping
+    // kick: two-step confirm, then drop this lancer from EVERY squad view.
+    // Their client re-reports on their next status change, so it's reversible.
+    const kick = card.querySelector(".lc-kick");
+    kick.addEventListener("click", (ev) => {
+      ev.stopPropagation(); // don't trigger the ping
+      if (kick.dataset.armed) {
+        squad.delete(e.who);
+        renderGM();
+        try {
+          OBR.broadcast.sendMessage(CH_STATUS, { type: "kick", who: e.who }, { destination: "REMOTE" });
+        } catch (_) {}
+      } else {
+        kick.dataset.armed = "1";
+        kick.classList.add("armed");
+        kick.textContent = "SURE?";
+        setTimeout(() => {
+          delete kick.dataset.armed;
+          kick.classList.remove("armed");
+          kick.textContent = "✕";
+        }, 2500);
+      }
+    });
     wrap.appendChild(card);
   }
 }
@@ -455,9 +478,14 @@ function renderNpcs() {
       <div class="lc-barrow"><span class="k">HEAT</span>${segBar(n.heat, Math.max(1, n.heatMax), "var(--heatred)")}<span class="v">${n.heat}/${n.heatMax}</span>
         <button class="pp" data-act="heat" data-d="-1">−</button><button class="pp" data-act="heat" data-d="1">+</button></div>
       <div class="lc-pips" style="padding:4px 0 0">
-        <span>EVA <b>${n.evasion}</b></span><span>E-DEF <b>${n.edef}</b></span>
-        <span>SPD <b>${n.speed}</b></span><span>ARMOR <b>${n.armor}</b></span>
-        <span>SAVE <b>${n.save}</b></span><span>SENS <b>${n.sensors ?? 10}</b></span>
+        <span>EVA <button class="pp" data-stat="evasion" data-d="-1">−</button><b>${n.evasion}</b><button class="pp" data-stat="evasion" data-d="1">+</button></span>
+        <span>SAVE <button class="pp" data-stat="save" data-d="-1">−</button><b>${n.save}</b><button class="pp" data-stat="save" data-d="1">+</button></span>
+        <span>SENS <button class="pp" data-stat="sensors" data-d="-1">−</button><b>${n.sensors ?? 10}</b><button class="pp" data-stat="sensors" data-d="1">+</button></span>
+      </div>
+      <div class="lc-pips" style="padding:4px 0 0">
+        <span>E-DEF <b>${n.edef}</b></span>
+        <span>SPD <b>${n.speed}</b></span>
+        <span>ARMOR <b>${n.armor}</b></span>
       </div>
       ${n.features ? `<div class="nc-notes">${n.features}</div>` : ""}`;
     card.querySelector('[data-act="edit"]').addEventListener("click", () => openNpcForm(n));
@@ -478,6 +506,15 @@ function renderNpcs() {
         const k = b.dataset.act, d = Number(b.dataset.d);
         if (k === "hp") n.hp = Math.max(0, Math.min(n.hpMax, n.hp + d));
         if (k === "heat") n.heat = Math.max(0, Math.min(n.heatMax, n.heat + d));
+        saveNpcs();
+        renderNpcs();
+      });
+    });
+    // quick-edit steppers for EVA / SAVE / SENS, right on the card
+    card.querySelectorAll(".pp[data-stat]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const k = b.dataset.stat, d = Number(b.dataset.d);
+        n[k] = Math.max(0, Math.min(99, (n[k] ?? 10) + d));
         saveNpcs();
         renderNpcs();
       });
@@ -887,11 +924,12 @@ function renderCC(s) {
   const coreRow = el.querySelector('.ccrow[data-key="core"]');
   const ci = coreInfo(currentMech?.frame);
   if (coreRow && ci) {
+    const head = `CORE: ${ci.name}${ci.activation ? ` — ${ci.activation}` : ""}`;
     coreRow.style.cursor = "help";
-    coreRow.addEventListener("mouseenter", (e) =>
-      showTip(`CORE: ${ci.name}${ci.activation ? ` — ${ci.activation}` : ""}`, ci.description, e));
+    coreRow.addEventListener("mouseenter", (e) => showTip(head, ci.description, e));
     coreRow.addEventListener("mousemove", moveTooltip);
     coreRow.addEventListener("mouseleave", hideTooltip);
+    coreRow.querySelector(".lbl")?.addEventListener("click", (e) => clickPin(head, ci.description, e));
   }
 }
 
@@ -1078,6 +1116,7 @@ function weaponCard(w, mountLabel) {
   nameEl.addEventListener("mouseenter", (e) => showTip(`${w.name} — ${act.title}`, body, e));
   nameEl.addEventListener("mousemove", moveTooltip);
   nameEl.addEventListener("mouseleave", hideTooltip);
+  nameEl.addEventListener("click", (e) => clickPin(`${w.name} — ${act.title}`, body, e));
   if (spec) {
     el.querySelector('[data-act="tmpl"]').addEventListener("click", async () => {
       if (spec.field) {
@@ -1173,10 +1212,12 @@ function renderSystems(m) {
     const bits = [];
     if (sys.activation) bits.push(sys.activation.toUpperCase());
     if (sys.sp != null) bits.push(`${sys.sp} SP`);
-    div.addEventListener("mouseenter", (e) =>
-      showTip(`${sys.name}${bits.length ? " — " + bits.join(" · ") : ""}`, sys.description || "No description in compendium.", e));
+    const head = `${sys.name}${bits.length ? " — " + bits.join(" · ") : ""}`;
+    const body = sys.description || "No description in compendium.";
+    div.addEventListener("mouseenter", (e) => showTip(head, body, e));
     div.addEventListener("mousemove", moveTooltip);
     div.addEventListener("mouseleave", hideTooltip);
+    div.addEventListener("click", (e) => clickPin(head, body, e));
     wrap.appendChild(div);
   });
 }
@@ -1194,10 +1235,12 @@ function renderTalentChips() {
     const div = document.createElement("div");
     div.className = "system talent";
     div.textContent = `${t.name} ${"I".repeat(Math.max(1, Math.min(3, t.rank)))}`;
-    div.addEventListener("mouseenter", (e) =>
-      showTip(`${t.name} — RANK ${t.rank}`, t.description || "No description in compendium.", e));
+    const head = `${t.name} — RANK ${t.rank}`;
+    const body = t.description || "No description in compendium.";
+    div.addEventListener("mouseenter", (e) => showTip(head, body, e));
     div.addEventListener("mousemove", moveTooltip);
     div.addEventListener("mouseleave", hideTooltip);
+    div.addEventListener("click", (e) => clickPin(head, body, e));
     wrap.appendChild(div);
   });
 }
@@ -1242,7 +1285,12 @@ function startTipScroll() {
   cycle();
 }
 
+// Click/tap PINS the tooltip in place (mobile lifesaver); the ✕ unpins it.
+// Hover behaviour is untouched — mouseleave only hides when unpinned.
+let tipPinned = false;
+
 function showTip(head, body, ev) {
+  if (tipPinned) return; // a pinned tip holds its ground
   $("tt-head").textContent = head;
   $("tt-body").textContent = body || "";
   tipEl.style.display = "block";
@@ -1250,7 +1298,30 @@ function showTip(head, body, ev) {
   startTipScroll();
   moveTooltip(ev);
 }
+
+function pinTip() {
+  if (tipEl.style.display !== "block") return;
+  tipPinned = true;
+  tipEl.classList.add("pinned");
+}
+
+$("tt-close")?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  tipPinned = false;
+  tipEl.classList.remove("pinned");
+  tipEl.style.display = "none";
+  stopTipScroll();
+});
+
+// clicking a chip (re)pins its tooltip — even if another tip is already pinned
+function clickPin(head, body, ev) {
+  tipPinned = false;
+  tipEl.classList.remove("pinned");
+  showTip(head, body, ev);
+  pinTip();
+}
 function moveTooltip(ev) {
+  if (tipPinned) return; // pinned tips don't chase the cursor
   const pad = 12;
   const r = tipEl.getBoundingClientRect();
   let x = ev.clientX + pad, y = ev.clientY + pad;
@@ -1260,6 +1331,7 @@ function moveTooltip(ev) {
   tipEl.style.top = `${Math.max(4, y)}px`;
 }
 function hideTooltip() {
+  if (tipPinned) return; // only the ✕ closes a pinned tooltip
   tipEl.style.display = "none";
   stopTipScroll();
 }
@@ -2122,6 +2194,12 @@ async function start() {
     OBR.broadcast.onMessage(CH_STATUS, (event) => {
       const d = event.data || {};
       if (d.type === "req") { broadcastStatus(); return; }
+      if (d.type === "kick" && d.who) {
+        // a GM removed this lancer from squad telemetry everywhere
+        squad.delete(d.who);
+        if (gmMode) renderGM();
+        return;
+      }
       if (d.type === "status" && d.who) {
         squad.set(d.who, d);
         if (gmMode) renderGM();

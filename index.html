@@ -134,7 +134,12 @@
 
       /* tooltip */
       #tooltip { position: fixed; z-index: 99; max-width: 310px; background: var(--navy); border: 1px solid var(--lavender); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.6); pointer-events: none; display: none; }
-      #tooltip .tt-head { background: var(--lavender); color: #16213e; font-weight: 700; font-size: 11px; letter-spacing: 1px; padding: 5px 9px; border-radius: 5px 5px 0 0; text-transform: uppercase; }
+      #tooltip .tt-head { background: var(--lavender); color: #16213e; font-weight: 700; font-size: 11px; letter-spacing: 1px; padding: 5px 26px 5px 9px; border-radius: 5px 5px 0 0; text-transform: uppercase; }
+      /* tapping/clicking a chip PINS the tooltip; the dark-purple X closes it */
+      #tooltip.pinned { pointer-events: auto; }
+      #tt-close { display: none; position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; background: #3b2766; color: #cdb6f0; border: 1px solid #5b21b6; border-radius: 3px; font-size: 10px; line-height: 1; padding: 0; cursor: pointer; }
+      #tooltip.pinned #tt-close { display: block; }
+      #tt-close:hover { background: #4a2a7a; color: #fff; }
       #tooltip .tt-body { padding: 8px 10px; font-size: 11.5px; line-height: 1.45; color: #dfe4f5; max-height: 46vh; overflow: hidden; transition: opacity 0.85s; }
 
       /* ---------- dice ---------- */
@@ -247,7 +252,10 @@
       .npc-card .nc-actions { margin-left: auto; display: flex; gap: 4px; }
       .npc-card .nc-notes { color: var(--muted); font-size: 11px; font-family: var(--mono); margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
       .gm-note { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-bottom: 10px; line-height: 1.5; }
-      .lancer-card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--tech); margin-bottom: 8px; }
+      .lancer-card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--tech); margin-bottom: 8px; position: relative; }
+      .lc-kick { position: absolute; top: 5px; right: 5px; z-index: 2; width: 20px; height: 20px; background: #11304f; color: #9fd2ff; border: 1px solid #2f6bbd; border-radius: 3px; font-size: 10px; line-height: 1; padding: 0; cursor: pointer; }
+      .lc-kick:hover { background: #1a4470; color: #fff; }
+      .lc-kick.armed { width: auto; padding: 0 5px; background: #5c1218; border-color: var(--crimson); color: #ffb0b0; }
       .lancer-card .lc-head { display: flex; align-items: baseline; gap: 8px; padding: 8px 10px 4px; flex-wrap: wrap; }
       .lancer-card .lc-callsign { font-weight: 700; font-size: 14px; letter-spacing: 1px; text-transform: uppercase; overflow-wrap: anywhere; max-width: 100%; }
       .lancer-card .lc-mech { overflow-wrap: anywhere; }
@@ -277,7 +285,7 @@
       <header>
         <img id="hdr-icon" src="./icons/tool.svg" alt="mode" title="Toggle MISSION//CONTROL (GM view)" onerror="this.style.display='none'" />
         <h1 id="hdr-title">LANCER<span class="slash">//</span>UPLINK</h1>
-        <span class="ver">v2.8.0</span>
+        <span class="ver">v2.8.1</span>
         <span id="conn-dot" title="Owlbear link status"></span>
       </header>
       <nav class="tabs" id="tabnav">
@@ -560,6 +568,7 @@
 
     <div id="tooltip">
       <div class="tt-head" id="tt-head"></div>
+      <button id="tt-close" title="Close">✕</button>
       <div class="tt-body" id="tt-body"></div>
     </div>
 
