@@ -70,6 +70,7 @@ function saveState() {
         cellSize: hex.grid.cellOverride,
         nudge: { ...hex.grid.nudge },
         uiScale,
+        sound: sndOn,
         macro: $("macro-toggle")?.checked || false,
         bond,
       }));
@@ -306,6 +307,7 @@ function openNpcForm(npc) {
   $("nf-spd").value = npc?.speed ?? 4;
   $("nf-arm").value = npc?.armor ?? 0;
   $("nf-save").value = npc?.save ?? 10;
+  $("nf-sens").value = npc?.sensors ?? 10;
   $("nf-notes").value = npc?.features || "";
   $("nf-name")?.focus();
 }
@@ -329,6 +331,7 @@ $("nf-save-btn")?.addEventListener("click", () => {
     speed: num("nf-spd", 4),
     armor: num("nf-arm", 0),
     save: num("nf-save", 10),
+    sensors: num("nf-sens", 10),
     features: $("nf-notes").value.trim(),
   };
   if (next.hp == null || next.hp > next.hpMax) next.hp = next.hpMax;
@@ -347,42 +350,77 @@ $("npc-clear")?.addEventListener("click", () => {
   renderNpcs();
 });
 
-// best-effort COMP/CON-ish NPC import: accepts an array or single object and
-// maps the common stat fields; anything unrecognised lands in the notes.
+// NPC import. Two paths:
+//   1) COMP/CON PILOT exports (the same file you import on the PILOT tab) —
+//      fully resolved through the compendium so the stats match exactly.
+//   2) Generic NPC JSON (array or single object) with best-effort mapping.
 $("npc-import")?.addEventListener("change", async (ev) => {
   const file = ev.target.files?.[0];
   if (!file) return;
   try {
     const json = JSON.parse(await file.text());
-    const list = Array.isArray(json) ? json : Array.isArray(json?.npcs) ? json.npcs : [json];
     let added = 0;
-    for (const o of list) {
-      if (!o || typeof o !== "object") continue;
-      const s = o.stats || o;
-      const featureNames = []
-        .concat(o.items || [], o.features || [], o.systems || [], o.weapons || [])
-        .map((x) => (typeof x === "string" ? x : x?.name || x?.id || ""))
-        .filter(Boolean);
-      npcs.push({
-        id: `npc-${Date.now()}-${added}`,
-        name: o.name || o.npc?.name || "Imported NPC",
-        tier: String(o.tier ?? s.tier ?? ""),
-        hpMax: Number(s.hp ?? s.max_hp ?? s.hp_max ?? 10) || 10,
-        hp: Number(s.hp ?? s.max_hp ?? 10) || 10,
-        heatMax: Number(s.heatcap ?? s.heat_cap ?? s.heat ?? 6) || 6,
-        heat: 0,
-        evasion: Number(s.evasion ?? s.evade ?? 8) || 8,
-        edef: Number(s.edef ?? s.e_def ?? 8) || 8,
-        speed: Number(s.speed ?? 4) || 4,
-        armor: Number(s.armor ?? 0) || 0,
-        save: Number(s.save ?? 10) || 10,
-        features: featureNames.join(", ") || (o.notes || ""),
-      });
-      added++;
+
+    // Path 1: looks like a COMP/CON pilot file? Resolve it properly.
+    const pilots = listPilots(json);
+    if (pilots.length) {
+      setStatus("Resolving COMP/CON file…");
+      await loadCompendium(() => {});
+      for (const rawPilot of pilots) {
+        try {
+          const { pilot, mechs } = parsePilot(rawPilot);
+          const mechRaw = mechs.find((m) => m.active) || mechs[0];
+          if (!mechRaw) continue;
+          const m = resolveMech(mechRaw, pilot);
+          const s = m.stats;
+          const weapons = m.mounts.flatMap((mt) => mt.weapons.map((w) => `${w.name} (${w.damage})`));
+          const systems = m.systems.map((x) => x.name);
+          npcs.push({
+            id: `npc-${Date.now()}-${added}`,
+            name: `${pilot.callsign} — ${m.name}`,
+            tier: `LL${pilot.level}`,
+            hpMax: s.hpMax, hp: s.hpMax,
+            heatMax: s.heatMax, heat: 0,
+            evasion: s.evasion, edef: s.edef,
+            speed: s.speed, armor: s.armor, save: s.save,
+            sensors: s.sensors,
+            features: [...weapons, ...systems].join(", "),
+          });
+          added++;
+        } catch (_) { /* skip malformed pilot */ }
+      }
+    } else {
+      // Path 2: generic NPC objects
+      const list = Array.isArray(json) ? json : Array.isArray(json?.npcs) ? json.npcs : [json];
+      for (const o of list) {
+        if (!o || typeof o !== "object") continue;
+        const s = o.stats || o;
+        const featureNames = []
+          .concat(o.items || [], o.features || [], o.systems || [], o.weapons || [])
+          .map((x) => (typeof x === "string" ? x : x?.name || x?.id || ""))
+          .filter(Boolean);
+        npcs.push({
+          id: `npc-${Date.now()}-${added}`,
+          name: o.name || o.npc?.name || "Imported NPC",
+          tier: String(o.tier ?? s.tier ?? ""),
+          hpMax: Number(s.hp ?? s.max_hp ?? s.hp_max ?? 10) || 10,
+          hp: Number(s.hp ?? s.max_hp ?? 10) || 10,
+          heatMax: Number(s.heatcap ?? s.heat_cap ?? s.heat ?? 6) || 6,
+          heat: 0,
+          evasion: Number(s.evasion ?? s.evade ?? 8) || 8,
+          edef: Number(s.edef ?? s.e_def ?? 8) || 8,
+          speed: Number(s.speed ?? 4) || 4,
+          armor: Number(s.armor ?? 0) || 0,
+          save: Number(s.save ?? 10) || 10,
+          sensors: Number(s.sensors ?? s.sensor_range ?? 10) || 10,
+          features: featureNames.join(", ") || (o.notes || ""),
+        });
+        added++;
+      }
     }
     saveNpcs();
     renderNpcs();
-    setStatus(added ? `Imported ${added} NPC${added === 1 ? "" : "s"}.` : "No NPCs found in that file.", added ? "status-ok" : "status-err");
+    setStatus(added ? `Imported ${added} NPC${added === 1 ? "" : "s"}.` : "No pilots or NPCs found in that file.", added ? "status-ok" : "status-err");
   } catch (e) {
     setStatus(`NPC import failed: ${e.message || e}`, "status-err");
   }
@@ -401,9 +439,11 @@ function renderNpcs() {
   for (const n of npcs) {
     const card = document.createElement("div");
     card.className = "npc-card";
+    // status colour: red name at 0 HP, orange when heat is maxed
+    const nameColor = n.hp <= 0 ? "#ff4d4d" : (n.heatMax > 0 && n.heat >= n.heatMax) ? "#ffae42" : "#ffffff";
     card.innerHTML = `
       <div class="nc-head">
-        <span class="nc-name">${n.name}</span>
+        <span class="nc-name" style="color:${nameColor}">${n.name}</span>
         ${n.tier ? `<span class="nc-tier">${n.tier}</span>` : ""}
         <span class="nc-actions">
           <button class="btn ghost small" data-act="edit">EDIT</button>
@@ -417,7 +457,7 @@ function renderNpcs() {
       <div class="lc-pips" style="padding:4px 0 0">
         <span>EVA <b>${n.evasion}</b></span><span>E-DEF <b>${n.edef}</b></span>
         <span>SPD <b>${n.speed}</b></span><span>ARMOR <b>${n.armor}</b></span>
-        <span>SAVE <b>${n.save}</b></span>
+        <span>SAVE <b>${n.save}</b></span><span>SENS <b>${n.sensors ?? 10}</b></span>
       </div>
       ${n.features ? `<div class="nc-notes">${n.features}</div>` : ""}`;
     card.querySelector('[data-act="edit"]').addEventListener("click", () => openNpcForm(n));
@@ -1080,9 +1120,9 @@ function renderTechCard(s) {
 // Core quick-tech options every mech has, plus any Invade options granted by
 // installed systems. Hover for the rules text; click to roll the tech attack.
 const INVADE_BASE = [
-  { name: "Invade — Fragment Signal", activation: "Quick Tech", detail: "Tech attack vs E-Defense. On hit: the target takes 2 Heat and is IMPAIRED and SLOWED until the end of its next turn." },
-  { name: "Scan", activation: "Quick Tech", detail: "Choose a character within Sensors: view its full stat block, hidden information (e.g. one piece of GM knowledge), or its last known orders. No attack roll needed." },
-  { name: "Lock On", activation: "Quick Tech", detail: "Choose a character within Sensors and line of sight: it gains LOCK ON. Any attacker may consume LOCK ON for +1 Accuracy on an attack against it. No attack roll needed." },
+  { name: "Invade — Fragment Signal", activation: "Quick Tech", roll: true, detail: "Tech attack vs E-Defense. On hit: the target takes 2 Heat and is IMPAIRED and SLOWED until the end of its next turn." },
+  { name: "Scan", activation: "Quick Tech", roll: false, detail: "Choose a character within Sensors: view its full stat block, hidden information (e.g. one piece of GM knowledge), or its last known orders. No attack roll — click toggles your sensor range." },
+  { name: "Lock On", activation: "Quick Tech", roll: false, detail: "Choose a character within Sensors and line of sight: it gains LOCK ON. Any attacker may consume LOCK ON for +1 Accuracy against it. No attack roll — click toggles your sensor range." },
 ];
 
 function renderInvades(m) {
@@ -1097,9 +1137,9 @@ function renderInvades(m) {
     for (const a of sys.actionsFull || []) {
       const act = a.activation || "";
       if (/invade/i.test(act)) {
-        sysInvades.push({ name: `Invade — ${a.name}`, activation: "Quick Tech (Invade)", detail: a.detail || sys.description || "" });
+        sysInvades.push({ name: `Invade — ${a.name}`, activation: "Quick Tech (Invade)", roll: true, detail: a.detail || sys.description || "" });
       } else if (/tech/i.test(act)) {
-        sysInvades.push({ name: a.name, activation: act, detail: a.detail || sys.description || "" });
+        sysInvades.push({ name: a.name, activation: act, roll: true, detail: a.detail || sys.description || "" });
       }
     }
   }
@@ -1110,7 +1150,10 @@ function renderInvades(m) {
     div.addEventListener("mouseenter", (e) => showTip(`${opt.name} — ${opt.activation}`, opt.detail, e));
     div.addEventListener("mousemove", moveTooltip);
     div.addEventListener("mouseleave", hideTooltip);
-    div.addEventListener("click", () => prepareTechAttack(opt.name.toUpperCase()));
+    // Scan / Lock On need no roll — clicking them toggles sensor range instead
+    div.addEventListener("click", () =>
+      opt.roll === false ? toggleSensors() : prepareTechAttack(opt.name.toUpperCase())
+    );
     wrap.appendChild(div);
   });
 }
@@ -1179,7 +1222,7 @@ function startTipScroll() {
   const cycle = () => {
     tipScrollTimer = setTimeout(() => {
       const step = () => {
-        b.scrollTop += 0.45; // leisurely
+        b.scrollTop += 0.22; // truly leisurely
         if (b.scrollTop + b.clientHeight < b.scrollHeight - 1) {
           tipScrollRaf = requestAnimationFrame(step);
         } else {
@@ -1189,12 +1232,12 @@ function startTipScroll() {
               b.scrollTop = 0;
               b.style.opacity = "1";
               cycle();
-            }, 380);
-          }, 1300);
+            }, 900);
+          }, 1900);
         }
       };
       tipScrollRaf = requestAnimationFrame(step);
-    }, 1000);
+    }, 1500);
   };
   cycle();
 }
@@ -1286,6 +1329,7 @@ async function initDiceTray() {
     }
     diceTray = mod.createDiceTray($("dicetray"), {
       scheme: () => $("scheme")?.value || "union",
+      sound: () => sndOn,
       height: 348,
     });
     window.__computeResult = mod.computeResult;
@@ -1383,6 +1427,22 @@ const setCrit = (on) => {
   if (critToggle) { critToggle.checked = on; $("crit-wrap")?.classList.toggle("ok-on", on); }
 };
 const rollsHidden = () => $("hideroll")?.checked || false;
+
+// dice sound toggle — subtle speaker button, persisted
+let sndOn = readStore().sound !== false;
+function refreshSndBtn() {
+  const b = $("snd-toggle");
+  if (!b) return;
+  b.textContent = sndOn ? "🔊" : "🔇";
+  b.classList.toggle("off", !sndOn);
+  b.title = sndOn ? "Dice sounds: on" : "Dice sounds: off";
+}
+$("snd-toggle")?.addEventListener("click", () => {
+  sndOn = !sndOn;
+  refreshSndBtn();
+  saveState();
+});
+refreshSndBtn();
 
 // ---- NHP commentary on a natural 1 ------------------------------------------------
 const NHP_QUIPS = [
@@ -1891,11 +1951,12 @@ $("macro-toggle")?.addEventListener("change", saveState);
 // ---- UI text size (zoom-based: scales text AND layout together cleanly) -------
 let uiScale = 1;
 function applyUiScale() {
-  uiScale = Math.max(0.8, Math.min(1.5, uiScale));
+  uiScale = Math.max(0.8, Math.min(1.4, uiScale)); // 140% cap — beyond that the page grows a sideways scrollbar
   document.body.style.zoom = uiScale;
   const v = $("font-val");
   if (v) v.textContent = `${Math.round(uiScale * 100)}%`;
   diceTray?.resize(); // the tray canvas needs to know about the new layout size
+  requestAnimationFrame(() => setGmView(gmView)); // re-measure the holo tab slider
 }
 // Keep the page pinned to the bottom while resizing so the A+/A− buttons
 // don't drift off-screen between clicks.
@@ -1933,6 +1994,10 @@ async function setOffsetDrag(on) {
   offsetDragMode = on;
   await refreshActiveFieldsNow(); // rebuild fields grabbable / locked
   updateDragOffsetBtn();
+  if (on) {
+    // hand the player Owlbear's MOVE tool so the drag starts instantly
+    try { await OBR.tool.activateTool("rodeo.owlbear.tool/move"); } catch (_) {}
+  }
 }
 
 $("btn-dragoffset")?.addEventListener("click", async () => {
@@ -1991,15 +2056,26 @@ async function start() {
     console.warn("[LANCER//UPLINK] scene readiness check failed", e);
   }
 
-  // 3) Bonded-token follow: re-centre active range fields when it moves.
+  // 3) Bonded-token follow: re-centre active range fields ONLY when the token
+  //    actually moves. (It used to refire on ANY scene change — every template
+  //    drop or other player's token nudge would re-place the fields, stomping
+  //    a freshly dragged offset. The offset is the new point of origin and it
+  //    travels WITH the token, not in spite of it.)
+  let lastBondPos = null;
   try {
     OBR.scene.items.onChange((items) => {
       if (!bond || !Object.keys(activeFields).length) return;
       const it = items.find((i) => i.id === bond.id);
       if (!it) return;
+      const p = it.position;
+      if (lastBondPos && Math.hypot(p.x - lastBondPos.x, p.y - lastBondPos.y) < 1) return;
+      const moved = !!lastBondPos;
+      lastBondPos = { x: p.x, y: p.y };
+      if (!moved) return; // first sighting — just record the position
       clearTimeout(followTimer);
       followTimer = setTimeout(async () => {
-        const c = hex.pixelToHex(it.position);
+        if (offsetCommitting || offsetDragMode) return; // never fight an active drag
+        const c = hex.pixelToHex(lastBondPos);
         for (const [kind, f] of Object.entries(activeFields)) {
           await placeFieldAt(kind, c, f.size, f.boost);
         }

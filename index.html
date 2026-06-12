@@ -135,7 +135,7 @@
       /* tooltip */
       #tooltip { position: fixed; z-index: 99; max-width: 310px; background: var(--navy); border: 1px solid var(--lavender); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.6); pointer-events: none; display: none; }
       #tooltip .tt-head { background: var(--lavender); color: #16213e; font-weight: 700; font-size: 11px; letter-spacing: 1px; padding: 5px 9px; border-radius: 5px 5px 0 0; text-transform: uppercase; }
-      #tooltip .tt-body { padding: 8px 10px; font-size: 11.5px; line-height: 1.45; color: #dfe4f5; max-height: 46vh; overflow: hidden; transition: opacity 0.35s; }
+      #tooltip .tt-body { padding: 8px 10px; font-size: 11.5px; line-height: 1.45; color: #dfe4f5; max-height: 46vh; overflow: hidden; transition: opacity 0.85s; }
 
       /* ---------- dice ---------- */
       .dice-area { display: flex; gap: 6px; align-items: stretch; }
@@ -211,6 +211,9 @@
       .chk input { width: auto; }
       .chk.ok-on { color: var(--gold); font-weight: 700; }
       .steplbl { font-size: 9px; letter-spacing: 1px; color: var(--muted); }
+      .sndbtn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; font-size: 12px; padding: 3px 7px; cursor: pointer; line-height: 1; }
+      .sndbtn.off { opacity: 0.45; }
+      .sndbtn:hover { border-color: var(--crimson); }
 
       #rolllog { max-height: 200px; overflow-y: auto; }
       .roll { background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--crimson); border-radius: 3px; padding: 6px 8px; margin-bottom: 6px; font-size: 12px; }
@@ -232,8 +235,8 @@
       #vis-toggle.all { color: var(--good); }
 
       /* ---------- MISSION//CONTROL (GM) ---------- */
-      .gm-tabs { position: relative; display: flex; gap: 4px; justify-content: space-between; margin-bottom: 10px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
-      .gm-tab { position: relative; z-index: 1; padding: 5px 8px; cursor: pointer; letter-spacing: 0.5px; white-space: nowrap; }
+      .gm-tabs { position: relative; display: flex; gap: 4px; align-items: stretch; margin-bottom: 10px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+      .gm-tab { position: relative; z-index: 1; flex: 1; padding: 5px 6px; cursor: pointer; letter-spacing: 0.5px; text-align: center; display: flex; align-items: center; justify-content: center; line-height: 1.35; }
       .gm-tab.sel { color: #bfeaff; }
       .gm-holo { position: absolute; top: 0; height: 100%; border: 1px solid rgba(126, 230, 255, 0.55); background: rgba(63, 167, 214, 0.14); border-radius: 4px; box-shadow: 0 0 10px rgba(126, 230, 255, 0.25), inset 0 0 12px rgba(126, 230, 255, 0.12); transition: left 0.35s cubic-bezier(0.4, 0, 0.2, 1), width 0.35s cubic-bezier(0.4, 0, 0.2, 1); pointer-events: none; }
       .npc-form { background: var(--panel); border: 1px solid var(--tech); padding: 10px; margin-bottom: 10px; }
@@ -274,7 +277,7 @@
       <header>
         <img id="hdr-icon" src="./icons/tool.svg" alt="mode" title="Toggle MISSION//CONTROL (GM view)" onerror="this.style.display='none'" />
         <h1 id="hdr-title">LANCER<span class="slash">//</span>UPLINK</h1>
-        <span class="ver">v2.7.0</span>
+        <span class="ver">v2.8.0</span>
         <span id="conn-dot" title="Owlbear link status"></span>
       </header>
       <nav class="tabs" id="tabnav">
@@ -401,6 +404,7 @@
           <label class="chk" id="crit-wrap" title="Crit damage: every damage die is rolled twice, keep the highest of each pair"><input id="crit-toggle" type="checkbox" /> CRIT</label>
           <label class="chk" title="Keep only the highest normal die"><input id="keephigh" type="checkbox" /> KEEP HIGH</label>
           <label class="chk" title="Roll stays on your screen only"><input id="hideroll" type="checkbox" /> HIDDEN</label>
+          <button id="snd-toggle" class="sndbtn" title="Dice sounds on/off">🔊</button>
           <select id="scheme" class="scheme-sel" title="Dice faction"></select>
         </div>
 
@@ -486,7 +490,7 @@
               <label style="margin:4px 0 2px">Y</label>
               <input id="nudge-y" type="range" min="-300" max="300" step="2" value="0" style="width:100%" />
             </div>
-            <button id="btn-dragoffset" class="btn ghost small" style="margin-top:8px;width:100%" disabled title="With a range field up: grab the field on the map and drag it into place">✥ CLICK-DRAG OFFSET: OFF</button>
+            <button id="btn-dragoffset" class="btn ghost small" style="margin-top:8px;width:100%" disabled title="With a range field up: grab the field on the map and drag it into place. TIP: turn OFF Owlbear's grid snapping (settings → disable grid snapping) for perfectly smooth dragging — with snapping on, the drag jumps tile by tile.">✥ CLICK-DRAG OFFSET: OFF</button>
             <button id="btn-fit" class="btn blue small" style="margin-top:8px;width:100%" title="Re-probe the scene's grid and match tile size & orientation to it">⌖ FIT TO SCENE</button>
           </div>
         </details>
@@ -517,7 +521,6 @@
         <div id="squad"></div>
 
         <div id="field" class="hidden">
-          <p class="muted" style="margin:0 0 8px; line-height:1.5">NPC roster — stored on YOUR machine only. Players never see this.</p>
           <div class="row" style="margin-bottom:8px">
             <button id="npc-add" class="btn blue small">+ ADD NPC</button>
             <label class="btn ghost small" style="text-align:center">IMPORT JSON<input id="npc-import" type="file" accept=".json,application/json" hidden /></label>
@@ -534,6 +537,7 @@
               <div><label>HP</label><input id="nf-hp" type="number" value="10" /></div>
               <div><label>Heat cap</label><input id="nf-heat" type="number" value="6" /></div>
               <div><label>Evasion</label><input id="nf-eva" type="number" value="8" /></div>
+              <div><label>Sensors</label><input id="nf-sens" type="number" value="10" /></div>
             </div>
             <div class="row" style="margin-top:6px">
               <div><label>E-Def</label><input id="nf-edef" type="number" value="8" /></div>

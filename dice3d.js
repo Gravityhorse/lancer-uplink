@@ -104,11 +104,24 @@ function extractFaces(geometry) {
   return out;
 }
 
+// ---- optional REAL stone texture -----------------------------------------------
+// Drop a seamless greyscale stone/marble image at  textures/stone.jpg  (512 or
+// 1024 px) in the repo and every die automatically wears it, tinted to its
+// faction colour. Without the file, the procedural granite below is used.
+let stoneImg = null;
+try {
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = () => { stoneImg = img; bodyTexCache.clear(); };
+  img.onerror = () => {};
+  img.src = new URL("./textures/stone.jpg", import.meta.url).href;
+} catch (_) {}
+
 // ---- procedural "tech" body texture ------------------------------------------
 // Base colour + panel grid + circuit traces + solder pads. Cached per colour.
 const bodyTexCache = new Map();
 function techTexture(baseColor, traceColor) {
-  const key = `${baseColor}|${traceColor}`;
+  const key = `${baseColor}|${traceColor}|${stoneImg ? "img" : "proc"}`;
   if (bodyTexCache.has(key)) return bodyTexCache.get(key);
   const s = 256;
   const cv = document.createElement("canvas");
@@ -118,6 +131,16 @@ function techTexture(baseColor, traceColor) {
   // base + subtle radial shading (kept bright so colours stay saturated)
   ctx.fillStyle = baseColor;
   ctx.fillRect(0, 0, s, s);
+  if (stoneImg) {
+    // real stone, tinted: multiply for the grain, screen pass for highlights
+    ctx.globalCompositeOperation = "multiply";
+    ctx.drawImage(stoneImg, 0, 0, s, s);
+    ctx.globalCompositeOperation = "screen";
+    ctx.globalAlpha = 0.22;
+    ctx.drawImage(stoneImg, 0, 0, s, s);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
   ctx.globalCompositeOperation = "saturation";
   ctx.fillStyle = "hsl(0, 94%, 50%)"; // deep, vivid colour — these should POP
   ctx.fillRect(0, 0, s, s);
@@ -333,7 +356,9 @@ export function createDiceTray(container, opts = {}) {
   camera.position.copy(CAM_HOME);
   camera.lookAt(LOOK_HOME);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  // sky/ground hemisphere gives the stone faces tonal variation per angle
+  scene.add(new THREE.HemisphereLight(0xbfd9ff, 0x32281e, 0.55));
   const key = new THREE.DirectionalLight(0xffffff, 1.0);
   key.position.set(6, 18, 8);
   key.castShadow = true;
@@ -624,36 +649,40 @@ export function createDiceTray(container, opts = {}) {
   }
   function playImpact(v) {
     if (!audioCtx) return;
+    if (opts.sound && !opts.sound()) return; // panel mute toggle
     const now = performance.now();
-    if (now - lastSound < 45) return; // don't machine-gun
+    if (now - lastSound < 55) return; // don't machine-gun
     lastSound = now;
     const t = audioCtx.currentTime;
     const vol = Math.min(1, v / 14);
-    // stone click: filtered noise burst
+    // deep stone knock: low-passed noise, slowed right down
     const src = audioCtx.createBufferSource();
     src.buffer = noiseBuf;
-    src.playbackRate.value = 0.9 + Math.random() * 0.35;
+    src.playbackRate.value = 0.5 + Math.random() * 0.2;
     const bp = audioCtx.createBiquadFilter();
     bp.type = "bandpass";
-    bp.frequency.value = 1500 + Math.random() * 900;
-    bp.Q.value = 1.2;
+    bp.frequency.value = 550 + Math.random() * 350;
+    bp.Q.value = 0.9;
+    const lp = audioCtx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 1600;
     const g = audioCtx.createGain();
-    g.gain.setValueAtTime(0.05 + 0.14 * vol, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
-    src.connect(bp).connect(g).connect(audioCtx.destination);
+    g.gain.setValueAtTime(0.03 + 0.08 * vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    src.connect(bp).connect(lp).connect(g).connect(audioCtx.destination);
     src.start(t);
-    src.stop(t + 0.09);
+    src.stop(t + 0.11);
     // low thump underneath — the WEIGHT
     const osc = audioCtx.createOscillator();
     osc.type = "sine";
-    osc.frequency.setValueAtTime(75 + Math.random() * 35, t);
-    osc.frequency.exponentialRampToValueAtTime(48, t + 0.09);
+    osc.frequency.setValueAtTime(52 + Math.random() * 22, t);
+    osc.frequency.exponentialRampToValueAtTime(36, t + 0.11);
     const g2 = audioCtx.createGain();
-    g2.gain.setValueAtTime(0.10 * vol, t);
-    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+    g2.gain.setValueAtTime(0.085 * vol, t);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
     osc.connect(g2).connect(audioCtx.destination);
     osc.start(t);
-    osc.stop(t + 0.11);
+    osc.stop(t + 0.14);
   }
 
   function convexShape(geometry) {

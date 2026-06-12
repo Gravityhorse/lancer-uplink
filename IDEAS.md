@@ -3,6 +3,18 @@
 Things that would make this tool genuinely great, roughly ordered by
 bang-for-buck.
 
+## Shipped in 2.8.0 ✓
+
+- ✓ Range fields follow the token only when it ACTUALLY moves — drag offsets
+  survive scene activity; offset toggle hands you Owlbear's move tool
+- ✓ NPC import accepts COMP/CON pilot files (fully compendium-resolved) and
+  generic NPC JSON; Sensors stat added; names go red at 0 HP / orange at max heat
+- ✓ Deeper, quieter stone impact sounds + speaker mute toggle (persisted)
+- ✓ Optional real stone texture: drop textures/stone.jpg in the repo
+- ✓ Scan / Lock On toggle sensor range instead of opening the dice tray
+- ✓ GM telemetry tabs wrap to two lines at large text sizes; 140% zoom cap
+- ✓ Slower, calmer tooltip scroll & fade
+
 ## Shipped in 2.7.0 ✓
 
 - ✓ FIELD TELEMETRY: GM-local NPC roster (add/edit/delete/import JSON,
