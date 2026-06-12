@@ -256,26 +256,33 @@ export function hexLine(origin, rad, n) {
 // aim runs along a vertex the first ring would come up empty, so the two
 // straddling cells are restored to keep the cone attached to its origin.
 export function hexCone(origin, rad, n) {
+  // Two aim regimes, auto-detected:
+  //  • EDGE aim (a distance-1 cell sits ON the aim line): use the STRICT
+  //    wedge — boundary rails trimmed, the slim triangle. Locked in; do not
+  //    touch — these are the 12/2/4/6/8/10 o'clock cones.
+  //  • VERTEX aim (no distance-1 cell inside the strict wedge): use the
+  //    INCLUSIVE wedge so rows run 2/3/4… — strict trimming over-thinned
+  //    these (row 2 collapsed to a single cell).
+  const strict = coneScan(origin, rad, n, (grid.square ? Math.PI / 4 : Math.PI / 6) - 0.02);
+  if (strict.hasD1) return strict.cells;
+  const wide = coneScan(origin, rad, n, (grid.square ? Math.PI / 4 : Math.PI / 6) + 0.02);
+  return wide.cells;
+}
+
+function coneScan(origin, rad, n, halfAngle) {
   const o = hexToPixel(origin);
-  const candidates = hexesInRange(origin, n, false);
-  const halfAngle = (grid.square ? Math.PI / 4 : Math.PI / 6) - 0.02;
-  const out = [];
+  const cells = [];
   let hasD1 = false;
-  const base = []; // near-boundary distance-1 cells, kept only if needed
-  for (const h of candidates) {
+  for (const h of hexesInRange(origin, n, false)) {
     const d = hexDistance(origin, h);
     if (d > n) continue;
     const p = hexToPixel(h);
-    const ang = Math.atan2(p.y - o.y, p.x - o.x);
-    let diff = Math.abs(ang - rad);
+    let diff = Math.abs(Math.atan2(p.y - o.y, p.x - o.x) - rad);
     if (diff > Math.PI) diff = 2 * Math.PI - diff;
     if (diff <= halfAngle) {
-      out.push(h);
+      cells.push(h);
       if (d === 1) hasD1 = true;
-    } else if (d === 1 && diff <= halfAngle + 0.08) {
-      base.push(h);
     }
   }
-  if (!hasD1) out.push(...base);
-  return out;
+  return { cells, hasD1 };
 }

@@ -128,6 +128,37 @@ function techTexture(baseColor, traceColor) {
   ctx.fillStyle = rg;
   ctx.fillRect(0, 0, s, s);
 
+  // ---- STONE: granite speckle + faint marble veining --------------------------
+  for (let i = 0; i < 1400; i++) {
+    const v = Math.random();
+    ctx.fillStyle = v < 0.5 ? "rgba(0,0,0,0.10)" : "rgba(255,255,255,0.07)";
+    ctx.fillRect(Math.random() * s, Math.random() * s, 1.4, 1.4);
+  }
+  ctx.strokeStyle = "rgba(255,255,255,0.07)";
+  ctx.lineWidth = 1.2;
+  for (let vn = 0; vn < 5; vn++) {
+    let x = Math.random() * s, y = Math.random() * s;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    for (let k = 0; k < 6; k++) {
+      x += (Math.random() - 0.5) * 90;
+      y += (Math.random() - 0.5) * 90;
+      ctx.quadraticCurveTo(
+        x + (Math.random() - 0.5) * 40, y + (Math.random() - 0.5) * 40, x, y
+      );
+    }
+    ctx.stroke();
+  }
+  // darker mineral patches for depth
+  for (let i = 0; i < 7; i++) {
+    const px = Math.random() * s, py = Math.random() * s, pr = 12 + Math.random() * 26;
+    const pg = ctx.createRadialGradient(px, py, 0, px, py, pr);
+    pg.addColorStop(0, "rgba(0,0,0,0.10)");
+    pg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = pg;
+    ctx.fillRect(px - pr, py - pr, pr * 2, pr * 2);
+  }
+
   // faint panel grid
   ctx.strokeStyle = "rgba(0,0,0,0.18)";
   ctx.lineWidth = 1;
@@ -177,8 +208,14 @@ function techTexture(baseColor, traceColor) {
 // Every face is "carved" in gold (silver on the crystal accent dice), with a
 // pattern per manufacturer: lotus petals (SSC), circuit work (HORUS), rigid
 // framing (HA), star ticks (Union), rope-and-arc (IPS-N), gem facets (acc/dis).
-function drawEngraving(ctx, s, fg, style = "tech") {
+// `inset` (0..1) shrinks the pattern toward the face centre — triangular faces
+// (d4/d8/d20) get a tight inset so engravings never spill onto neighbours.
+function drawEngraving(ctx, s, fg, style = "tech", inset = 1) {
   ctx.save();
+  if (inset < 1) {
+    ctx.translate((s * (1 - inset)) / 2, (s * (1 - inset)) / 2);
+    ctx.scale(inset, inset);
+  }
   ctx.strokeStyle = fg;
   ctx.fillStyle = fg;
   ctx.globalAlpha = 0.5;
@@ -245,15 +282,15 @@ function drawEngraving(ctx, s, fg, style = "tech") {
 const numTexCache = new Map();
 // `underline` disambiguates 6 / 9 — only meaningful on dice that actually
 // HAVE a 9 (d10/d12/d20). A d6's 6 stays a clean 6.
-function numberTexture(value, fg, underline = false, engColor = "#d9b44a", engStyle = "tech") {
-  const key = `${value}|${fg}|${underline ? "u" : ""}|${engColor}|${engStyle}`;
+function numberTexture(value, fg, underline = false, engColor = "#d9b44a", engStyle = "tech", inset = 1) {
+  const key = `${value}|${fg}|${underline ? "u" : ""}|${engColor}|${engStyle}|${inset}`;
   if (numTexCache.has(key)) return numTexCache.get(key);
   const s = 128;
   const cv = document.createElement("canvas");
   cv.width = cv.height = s;
   const ctx = cv.getContext("2d");
   ctx.clearRect(0, 0, s, s);
-  drawEngraving(ctx, s, engColor, engStyle);
+  drawEngraving(ctx, s, engColor, engStyle, inset);
   // soft dark halo behind the glyph so white numbers pop on light faces too
   ctx.shadowColor = "rgba(0,0,0,0.85)";
   ctx.shadowBlur = 10;
@@ -280,7 +317,7 @@ export function createDiceTray(container, opts = {}) {
   const W = container.clientWidth || 360;
   const H = opts.height || 300;
   const TRAY = 9;
-  const HOVER_Y = 4.2; // staging altitude — high enough to read as "held"
+  const HOVER_Y = 6.4; // staging altitude — held high, close to camera, long drop
 
   const CAM_HOME = new THREE.Vector3(0, 21, 8.5);
   const LOOK_HOME = new THREE.Vector3(0, 0, 0);
@@ -508,12 +545,14 @@ export function createDiceTray(container, opts = {}) {
           flatShading: true,
         })
       : new THREE.MeshPhysicalMaterial({
+          // polished STONE: barely metallic, matte mineral body under a
+          // lacquer-thin clearcoat — heavy, not plasticky
           map: techTexture(c.body, c.trace || "#ffffff"),
           color: "#ffffff",
-          roughness: 0.45, metalness: 0.5,
-          clearcoat: 0.9, clearcoatRoughness: 0.14,
+          roughness: 0.34, metalness: 0.06,
+          clearcoat: 0.55, clearcoatRoughness: 0.22,
           emissive: new THREE.Color(c.emissive || "#000000"),
-          emissiveIntensity: 0.45,
+          emissiveIntensity: 0.3,
           flatShading: true,
         });
     const mesh = new THREE.Mesh(geometry, mat);
@@ -522,10 +561,14 @@ export function createDiceTray(container, opts = {}) {
     const needsUnderline = def.faces >= 9; // has both a 6 and a 9 face
     const engColor = isCrystal ? "#d7dde6" : "#d9b44a"; // silver / gold
     const engStyle = c.engStyle || "tech";
+    // triangular faces are cramped — inset the engraving hard so neighbouring
+    // faces never visually overlap (the d20 complaint)
+    const engInset = (type === "d4" || type === "d8" || type === "d20") ? 0.52
+      : (type === "d10" || type === "d12") ? 0.74 : 0.95;
     faces.forEach((f, i) => {
       const disp = type === "d10" ? (values[i] === 0 ? 10 : values[i]) : values[i];
-      const tex = numberTexture(disp, c.num, needsUnderline, engColor, engStyle);
-      const size = type === "d6" ? 0.8 : type === "d20" ? 0.62 : 0.7;
+      const tex = numberTexture(disp, c.num, needsUnderline, engColor, engStyle, engInset);
+      const size = type === "d6" ? 0.8 : type === "d20" ? 0.58 : 0.7;
       const plane = new THREE.Mesh(
         new THREE.PlaneGeometry(size, size),
         new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })
@@ -545,11 +588,72 @@ export function createDiceTray(container, opts = {}) {
     body.sleepTimeLimit = 0.25;
     world.addBody(body);
 
+    // stone-on-stone impact sounds, scaled by how hard the die hits
+    body.addEventListener("collide", (e) => {
+      try {
+        const v = e.contact ? Math.abs(e.contact.getImpactVelocityAlongNormal()) : 0;
+        if (v > 1.6) playImpact(v);
+      } catch (_) {}
+    });
+
     return {
       type, role, mesh, body, faces, values, read: def.read,
+      schemeKey: role === "normal" ? getSchemeKey() : null, // glitch is per-die
       staged: false, basePos: new THREE.Vector3(), phase: Math.random() * Math.PI * 2,
       forceTo: null, snap: null,
     };
+  }
+
+  // ---- impact audio: subtle, weighty stone clicks ------------------------------
+  let audioCtx = null;
+  let noiseBuf = null;
+  let lastSound = 0;
+  function ensureAudio() {
+    if (audioCtx) return;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const len = Math.floor(audioCtx.sampleRate * 0.1);
+      noiseBuf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+      const d = noiseBuf.getChannelData(0);
+      let last = 0;
+      for (let i = 0; i < len; i++) { // brown-ish noise: rounder than white
+        last = (last + (Math.random() * 2 - 1) * 0.25) * 0.96;
+        d[i] = last * 3;
+      }
+    } catch (_) { audioCtx = null; }
+  }
+  function playImpact(v) {
+    if (!audioCtx) return;
+    const now = performance.now();
+    if (now - lastSound < 45) return; // don't machine-gun
+    lastSound = now;
+    const t = audioCtx.currentTime;
+    const vol = Math.min(1, v / 14);
+    // stone click: filtered noise burst
+    const src = audioCtx.createBufferSource();
+    src.buffer = noiseBuf;
+    src.playbackRate.value = 0.9 + Math.random() * 0.35;
+    const bp = audioCtx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 1500 + Math.random() * 900;
+    bp.Q.value = 1.2;
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.05 + 0.14 * vol, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+    src.connect(bp).connect(g).connect(audioCtx.destination);
+    src.start(t);
+    src.stop(t + 0.09);
+    // low thump underneath — the WEIGHT
+    const osc = audioCtx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(75 + Math.random() * 35, t);
+    osc.frequency.exponentialRampToValueAtTime(48, t + 0.09);
+    const g2 = audioCtx.createGain();
+    g2.gain.setValueAtTime(0.10 * vol, t);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+    osc.connect(g2).connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + 0.11);
   }
 
   function convexShape(geometry) {
@@ -647,9 +751,10 @@ export function createDiceTray(container, opts = {}) {
     return new Promise((resolve) => {
       if (rolling || !list.length) { resolve(null); return; }
       rolling = true;
-      // re-frame on the action EVERY throw (fixes the "staring at empty
-      // space" re-roll bug — the camera was still aimed at the last landing
-      // spot). The throw is tuned to land inside this framing.
+      ensureAudio();
+      try { if (audioCtx?.state === "suspended") audioCtx.resume(); } catch (_) {}
+      // camera order: dice were added at HOME view — the throw brings a
+      // SLIGHT zoom, and the result zoom lands after settle
       stageView();
       stage(list);
       list.forEach((die) => {
@@ -728,9 +833,8 @@ export function createDiceTray(container, opts = {}) {
     });
     schemeKeyOverride = null;
     stage();
-    stageView(); // same cinematic close-up the roller saw
     await new Promise((r) => setTimeout(r, 350));
-    return throwDice(dice.slice(), power);
+    return throwDice(dice.slice(), power); // throw applies the slight zoom
   }
 
   // ---- camera tween -----------------------------------------------------------
@@ -762,10 +866,10 @@ export function createDiceTray(container, opts = {}) {
 
   function resetCamera() { tweenCam(CAM_HOME, LOOK_HOME, 0.5); }
 
-  // Close-up that frames BOTH the hovering dice and the landing zone, so the
-  // whole throw plays out on camera.
+  // SLIGHT zoom for the throw itself — frames the hovering dice and the
+  // landing zone; the big zoom comes after the dice settle.
   function stageView() {
-    tweenCam(new THREE.Vector3(0, 12.5, 12.0), new THREE.Vector3(0, 1.6, 0.6), 0.55);
+    tweenCam(new THREE.Vector3(0, 15.5, 10.5), new THREE.Vector3(0, 1.4, 0.4), 0.5);
   }
 
   // ---- render + physics loop ----------------------------------------------------
@@ -801,29 +905,30 @@ export function createDiceTray(container, opts = {}) {
       }
     });
 
-    // HORUS glitch: emissive shimmer always; while ROLLING the dice visibly
-    // "corrupt" — random position pops + scale stutter + a CSS channel-shift
-    // class on the tray container (styled in index.html).
-    const scheme = getScheme();
-    container.classList.toggle("glitching", !!scheme.glitch && rolling);
-    if (scheme.glitch) {
-      glitchT += dt;
-      const f = 0.3 + 0.7 * Math.abs(Math.sin(glitchT * 9.3));
-      dice.forEach((d) => {
-        if (d.role === "normal") d.mesh.material.emissiveIntensity = f;
-        // gentle corruption stutter — kept subtle (no strobe / flash risk)
-        if (rolling && Math.random() < 0.05) {
-          d.mesh.position.x += (Math.random() - 0.5) * 0.18;
-          d.mesh.position.z += (Math.random() - 0.5) * 0.18;
-          const sc = 0.94 + Math.random() * 0.12;
-          d.mesh.scale.setScalar(sc);
-        } else if (!rolling) {
+    // HORUS glitch — PER DIE: only dice that were BUILT as HORUS corrupt,
+    // regardless of what scheme is selected right now (switching factions
+    // after a roll no longer retro-glitches old dice).
+    glitchT += dt;
+    const f = 0.3 + 0.7 * Math.abs(Math.sin(glitchT * 9.3));
+    let anyHorusRolling = false;
+    dice.forEach((d) => {
+      if (d.schemeKey === "horus") {
+        d.mesh.material.emissiveIntensity = f;
+        if (rolling) {
+          anyHorusRolling = true;
+          if (Math.random() < 0.05) {
+            d.mesh.position.x += (Math.random() - 0.5) * 0.18;
+            d.mesh.position.z += (Math.random() - 0.5) * 0.18;
+            d.mesh.scale.setScalar(0.94 + Math.random() * 0.12);
+          }
+        } else {
           d.mesh.scale.setScalar(1);
         }
-      });
-    } else {
-      dice.forEach((d) => d.mesh.scale.setScalar(1));
-    }
+      } else {
+        d.mesh.scale.setScalar(1);
+      }
+    });
+    container.classList.toggle("glitching", anyHorusRolling);
 
     if (camTween) {
       camTween.t = Math.min(1, camTween.t + dt / camTween.dur);

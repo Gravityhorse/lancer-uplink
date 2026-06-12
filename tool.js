@@ -1,46 +1,31 @@
-// tool.js — registers the LANCER Templates tool in Owlbear's toolbar.
+// tool.js — registers the LANCER Templates tool in Owlbear's toolbar and
+// backs the panel's range-field arming.
 //
-// Toolbar modes (top-centre bar when the tool is selected): BLAST, CONE,
-// LINE, ERASE. Move / sensor / weapon-range fields are placed from the
-// panel — when armed they ride the Blast mode's click handler, keeping
-// their own colour and always-private visibility.
+// Toolbar modes: BLAST, CONE, LINE, ERASE.
+// Placement: click-and-drag — press point is the ORIGIN, release sets size
+// (and direction for cone/line). Everything snaps to the grid. While
+// dragging, a counter above the cursor shows the tile distance from the
+// origin, and placed templates carry a white distance number on their
+// farthest tile. Lines also get their origin hex outlined.
 //
-// Placement model: click-and-drag — the press point is the ORIGIN, the
-// release point sets size (blast radius) or size + direction (cone / line).
-// Everything snaps to the grid. A template can be "armed" from the mech
-// sheet with a fixed size, then a single click drops it.
-//
-// Robustness notes (fixes for ghost previews / sticky blasts):
-//   • Preview updates are SERIALIZED — pointer events fire faster than the
-//     OBR add/delete round-trips, and overlapping updates used to strand
-//     orphan preview items that looked like phantom templates and survived
-//     until a reload. Only one preview op runs at a time; the newest
-//     requested preview wins.
-//   • clearPreview() deletes every preview-kind local item by metadata, not
-//     just the ones we remember creating.
-//   • The eraser hit-tests shared templates, private templates, range
-//     fields AND stray previews, with a radius scaled to the live grid.
+// Every template is a GROUP (path + label + origin marker) sharing a group
+// id, so erase and UNDO remove the whole thing together.
 
-import { OBR, ID, META } from "./sdk.js";
+import { OBR, ID, META, buildLabel } from "./sdk.js";
 import {
   pixelToHex,
   hexesInRange,
   hexCone,
   hexLine,
   snapAngle,
-  keyToHex,
   hexToPixel,
   hexDistance,
   grid,
-  setNudge,
 } from "./hex.js";
 import {
   buildHexOverlay,
   addSharedTemplate,
   addLocalTemplate,
-  getTerrainSet,
-  removeTerrainHex,
-  renderTerrain,
   showBoostField,
 } from "./overlay.js";
 
@@ -52,17 +37,8 @@ export const MODES = {
   cone: `${ID}/mode-cone`,
   line: `${ID}/mode-line`,
   erase: `${ID}/mode-erase`,
-  offset: `${ID}/mode-offset`,
 };
 
-// Click-drag offset: the panel arms this mode; dragging on the map slides the
-// whole lattice (and every active range field with it). The panel registers a
-// callback so fields re-render live and the offset persists.
-let offsetCb = null;
-export function setOffsetCallback(fn) { offsetCb = fn; }
-
-// Semantic shapes (drive colour + visibility). move/tech/weapon are panel-
-// armed only and use the blast mode for placement.
 const COLORS = {
   move: "#5ad17a",
   tech: "#3da5ff",
@@ -81,20 +57,18 @@ const LABELS = {
   line: "Line",
 };
 
-// Which toolbar mode handles an armed shape.
 const MODE_FOR_SHAPE = {
   blast: "blast", move: "blast", tech: "blast", weapon: "blast",
   cone: "cone", line: "line",
 };
 
-// Private range fields: only you see them.
 const ALWAYS_LOCAL = new Set(["move", "tech", "weapon"]);
 
 let registered = false;
 export const isRegistered = () => registered;
 
-// ---- visibility (set from the MAP tab toggle) ---------------------------------
-let templateVisibility = "all"; // "all" | "me"
+// ---- visibility (MAP tab toggle) ------------------------------------------------
+let templateVisibility = "all";
 export function setTemplateVisibility(v) {
   templateVisibility = v === "me" ? "me" : "all";
 }
@@ -102,18 +76,97 @@ export function getTemplateVisibility() {
   return templateVisibility;
 }
 
-async function placeTemplate(shape, hexes, name) {
-  const color = COLORS[shape] || COLORS.blast;
-  const local = ALWAYS_LOCAL.has(shape) || templateVisibility === "me";
-  if (local) {
-    await addLocalTemplate(hexes, { color, name });
-  } else {
-    await addSharedTemplate(hexes, { color, name });
+// ---- undo stack -------------------------------------------------------------------
+// [{ local: bool, group: string }]
+const undoStack = [];
+
+export async function undoLastTemplate() {
+  const entry = undoStack.pop();
+  if (!entry) return false;
+  try {
+    const api = entry.local ? OBR.scene.local : OBR.scene.items;
+    const items = await api.getItems((i) => i.metadata?.[META]?.group === entry.group);
+    if (items.length) await api.deleteItems(items.map((i) => i.id));
+    return true;
+  } catch (_) {
+    return false;
   }
 }
 
-// ---- armed (panel) state --------------------------------------------------------
-// { shape, size, name, boost }
+// ---- placement (grouped: path + distance label + origin marker) --------------------
+let groupSeq = 0;
+
+// Defensive builder: style setters vary across SDK versions, so each call is
+// applied only if the builder actually has it — a missing one can never brick
+// template placement.
+function distanceLabelItem(pos, n, group, kind) {
+  let b = buildLabel().plainText(String(n)).position(pos);
+  const opt = (fn, ...args) => { try { if (typeof b[fn] === "function") b = b[fn](...args); } catch (_) {} };
+  opt("pointerHeight", 0);
+  opt("pointerWidth", 0);
+  opt("backgroundOpacity", 0.55);
+  opt("layer", "PROP");
+  opt("locked", true);
+  opt("disableHit", true);
+  opt("name", "Template distance");
+  opt("metadata", { [META]: { kind, group } });
+  return b.build();
+}
+
+function originMarkerItem(originHex, color, group, kind) {
+  return buildHexOverlay([originHex], {
+    color,
+    fillOpacity: 0.05,
+    strokeOpacity: 0.95,
+    strokeWidth: 5,
+    name: "Template origin",
+    kind,
+    layer: "PROP",
+    extra: { group },
+  });
+}
+
+// shape: semantic shape; hexes: cells; opts: { name, n, labelHex, originHex }
+async function placeTemplate(shape, hexes, opts = {}) {
+  if (!hexes.length) return;
+  const color = COLORS[shape] || COLORS.blast;
+  const local = ALWAYS_LOCAL.has(shape) || templateVisibility === "me";
+  const kind = local ? "template-local" : "template";
+  const group = `g${Date.now()}-${++groupSeq}`;
+  const items = [];
+
+  if (local) {
+    await addLocalTemplate(hexes, { color, name: opts.name, extra: { group } });
+  } else {
+    await addSharedTemplate(hexes, { color, name: opts.name, extra: { group } });
+  }
+  if (opts.labelHex != null && opts.n != null) {
+    items.push(distanceLabelItem(hexToPixel(opts.labelHex), opts.n, group, kind));
+  }
+  if (opts.originHex) {
+    items.push(originMarkerItem(opts.originHex, color, group, kind));
+  }
+  if (items.length) {
+    try {
+      if (local) await OBR.scene.local.addItems(items);
+      else await OBR.scene.items.addItems(items);
+    } catch (_) {}
+  }
+  undoStack.push({ local, group });
+  if (undoStack.length > 40) undoStack.shift();
+}
+
+// farthest cell from the origin (for the distance label)
+function farthestHex(hexes, origin) {
+  let best = null, bd = -1;
+  for (const h of hexes) {
+    const d = hexDistance(origin, h);
+    if (d > bd) { bd = d; best = h; }
+  }
+  return best;
+}
+
+// ---- armed (panel) state -------------------------------------------------------------
 let armed = null;
 let boostSeq = 0;
 
@@ -136,13 +189,12 @@ export async function activateMode(mode) {
 
 const disarm = () => { armed = null; };
 
-// ---- live preview overlay — SERIALIZED ---------------------------------------------
+// ---- live preview + cursor distance counter (SERIALIZED) ------------------------------
 let previewBusy = false;
-let previewNext = null; // latest requested { hexes, color } | "clear"
-let previewIds = [];
+let previewNext = null; // { hexes, color, cursor: {pos, n} | null } | "clear"
 
-function requestPreview(hexes, color) {
-  previewNext = { hexes, color };
+function requestPreview(hexes, color, cursor) {
+  previewNext = { hexes, color, cursor: cursor || null };
   pumpPreview();
 }
 function requestPreviewClear() {
@@ -157,21 +209,30 @@ async function pumpPreview() {
   previewNext = null;
   try {
     await deleteAllPreviews();
-    if (job !== "clear" && job.hexes.length) {
-      const item = buildHexOverlay(job.hexes, {
-        color: job.color,
-        fillOpacity: 0.18,
-        strokeOpacity: 0.6,
-        strokeWidth: 2,
-        name: "Template preview",
-        kind: "preview",
-      });
-      await OBR.scene.local.addItems([item]);
-      previewIds = [item.id];
+    if (job !== "clear") {
+      const items = [];
+      if (job.hexes.length) {
+        items.push(buildHexOverlay(job.hexes, {
+          color: job.color,
+          fillOpacity: 0.18,
+          strokeOpacity: 0.6,
+          strokeWidth: 2,
+          name: "Template preview",
+          kind: "preview",
+          layer: "PROP",
+        }));
+      }
+      if (job.cursor) {
+        items.push(distanceLabelItem(
+          { x: job.cursor.pos.x, y: job.cursor.pos.y - (grid.dpi || 150) * 0.55 },
+          job.cursor.n, null, "preview"
+        ));
+      }
+      if (items.length) await OBR.scene.local.addItems(items);
     }
   } catch (_) { /* scene not ready — ignore */ }
   previewBusy = false;
-  if (previewNext != null) pumpPreview(); // run the newest pending job
+  if (previewNext != null) pumpPreview();
 }
 
 async function deleteAllPreviews() {
@@ -181,11 +242,10 @@ async function deleteAllPreviews() {
     );
     if (items.length) await OBR.scene.local.deleteItems(items.map((i) => i.id));
   } catch (_) {}
-  previewIds = [];
 }
 
 let dragOrigin = null;
-let placing = false; // guards against double placements from event bursts
+let placing = false;
 
 async function placeOnce(fn) {
   if (placing) return;
@@ -194,10 +254,8 @@ async function placeOnce(fn) {
   finally { setTimeout(() => { placing = false; }, 150); }
 }
 
-// ---- mode factories -------------------------------------------------------------------
+// ---- modes -------------------------------------------------------------------------------
 
-// Blast mode also hosts armed move/tech/weapon fields (their colour follows
-// the armed shape). Manual use: drag from centre to set the radius.
 function blastMode(icon) {
   const colorOf = () => COLORS[armed?.shape || "blast"];
   return {
@@ -209,11 +267,12 @@ function blastMode(icon) {
       if (!armed) return requestPreviewClear();
       const h = pixelToHex(ev.pointerPosition);
       const r = armed.boost ? armed.size * 2 : armed.size;
-      requestPreview(hexesInRange(h, r, true), colorOf());
+      requestPreview(hexesInRange(h, r, true), colorOf(),
+        { pos: ev.pointerPosition, n: armed.size });
     },
 
     async onToolClick(_ctx, ev) {
-      if (!armed) return; // manual placement uses drag
+      if (!armed) return;
       const a = armed;
       disarm();
       requestPreviewClear();
@@ -222,7 +281,7 @@ function blastMode(icon) {
         if (a.boost) {
           await showBoostField(`tool-boost-${++boostSeq}`, h, a.size, { color: COLORS[a.shape], name: a.name });
         } else {
-          await placeTemplate(a.shape, hexesInRange(h, a.size, true), a.name);
+          await placeTemplate(a.shape, hexesInRange(h, a.size, true), { name: a.name });
         }
       });
     },
@@ -233,7 +292,8 @@ function blastMode(icon) {
     async onToolDragMove(_ctx, ev) {
       if (!dragOrigin) return;
       const n = armed ? armed.size : hexDistance(dragOrigin, pixelToHex(ev.pointerPosition));
-      requestPreview(hexesInRange(dragOrigin, n, true), colorOf());
+      requestPreview(hexesInRange(dragOrigin, n, true), colorOf(),
+        { pos: ev.pointerPosition, n });
     },
     async onToolDragEnd(_ctx, ev) {
       if (!dragOrigin) return;
@@ -249,7 +309,9 @@ function blastMode(icon) {
         if (a && a.boost) {
           await showBoostField(`tool-boost-${++boostSeq}`, origin, a.size, { color: COLORS[a.shape], name: a.name });
         } else {
-          await placeTemplate(shape, hexesInRange(origin, n, true), name);
+          await placeTemplate(shape, hexesInRange(origin, n, true), {
+            name, n, labelHex: pixelToHex(ev.pointerPosition),
+          });
         }
       });
     },
@@ -264,12 +326,14 @@ function blastMode(icon) {
   };
 }
 
-// Directional modes (cone / line): origin = press point, pointer sets direction.
-function directionalMode(shape, icon, fn) {
+// Directional modes. Cone snaps to grid-friendly angles; the LINE runs free
+// in any direction (it samples cells along the true pointer bearing).
+function directionalMode(shape, icon, fn, snap) {
   const color = COLORS[shape];
   const angleOf = (origin, ev) => {
     const o = hexToPixel(origin);
-    return snapAngle(Math.atan2(ev.pointerPosition.y - o.y, ev.pointerPosition.x - o.x));
+    const raw = Math.atan2(ev.pointerPosition.y - o.y, ev.pointerPosition.x - o.x);
+    return snap ? snapAngle(raw) : raw;
   };
   const sizeOf = (origin, ev) =>
     armed && armed.shape === shape
@@ -286,7 +350,9 @@ function directionalMode(shape, icon, fn) {
     },
     async onToolDragMove(_ctx, ev) {
       if (!dragOrigin) return;
-      requestPreview(fn(dragOrigin, angleOf(dragOrigin, ev), sizeOf(dragOrigin, ev)), color);
+      const n = sizeOf(dragOrigin, ev);
+      requestPreview(fn(dragOrigin, angleOf(dragOrigin, ev), n), color,
+        { pos: ev.pointerPosition, n });
     },
     async onToolDragEnd(_ctx, ev) {
       if (!dragOrigin) return;
@@ -298,7 +364,11 @@ function directionalMode(shape, icon, fn) {
       disarm();
       requestPreviewClear();
       if (!hexes.length) return;
-      await placeOnce(() => placeTemplate(shape, hexes, name));
+      await placeOnce(() => placeTemplate(shape, hexes, {
+        name, n,
+        labelHex: farthestHex(hexes, origin),
+        originHex: shape === "line" ? origin : null, // lines mark their origin
+      }));
     },
     onToolDragCancel() {
       dragOrigin = null;
@@ -311,53 +381,45 @@ function directionalMode(shape, icon, fn) {
   };
 }
 
-// ---- eraser -----------------------------------------------------------------------------
-// Removes, in priority order: stray previews → my private templates / range
-// fields → my shared templates → legacy terrain. Hit radius scales with grid.
+// ---- eraser (group-aware) ------------------------------------------------------------------
+// Removes the WHOLE template group (path + label + origin marker) of whatever
+// you click. Range fields are untouchable here — clear those from the panel.
 async function eraseAt(p) {
   const radius = Math.max(60, (grid.square ? grid.S : grid.R * 1.9) * 1.2);
-  const near = (i) =>
-    (i.commands || []).some((c) => c[0] === 0 && Math.hypot(c[1] - p.x, c[2] - p.y) < radius);
+  const near = (i) => {
+    if (i.position && (i.position.x || i.position.y)) {
+      if (Math.hypot(i.position.x - p.x, i.position.y - p.y) < radius) return true;
+    }
+    return (i.commands || []).some((c) => c[0] === 0 && Math.hypot(c[1] - p.x, c[2] - p.y) < radius);
+  };
 
-  // NOTE: range fields (move/sensors/weapon) are deliberately NOT erasable
-  // here — clear those with their toggle buttons or CLEAR MY RANGE FIELDS.
-  // This stops the eraser from eating your movement field by accident.
-
-  // 1) stray previews — always purge on any erase click
   await deleteAllPreviews();
 
-  // 2) my local (private) templates
-  try {
-    const locals = await OBR.scene.local.getItems((i) => {
-      const k = i.metadata?.[META]?.kind;
-      return k === "template-local" && near(i);
-    });
-    if (locals.length) {
-      await OBR.scene.local.deleteItems(locals.map((i) => i.id));
+  const wipeGroups = async (api, kind) => {
+    try {
+      const all = await api.getItems((i) => i.metadata?.[META]?.kind === kind);
+      const hit = all.filter(near);
+      if (!hit.length) return false;
+      const groups = new Set(hit.map((i) => i.metadata?.[META]?.group).filter(Boolean));
+      const doomed = all.filter((i) => groups.has(i.metadata?.[META]?.group) || hit.includes(i));
+      await api.deleteItems(doomed.map((i) => i.id));
       return true;
-    }
-  } catch (_) {}
+    } catch (_) { return false; }
+  };
 
-  // 3) my shared templates
+  if (await wipeGroups(OBR.scene.local, "template-local")) return true;
+
+  // shared templates: only my own
   try {
     const me = await OBR.player.getId();
-    const items = await OBR.scene.items.getItems(
-      (i) => i.metadata?.[META]?.kind === "template" && i.createdUserId === me && near(i)
-    );
-    if (items.length) {
-      await OBR.scene.items.deleteItems(items.map((i) => i.id));
-      return true;
-    }
-  } catch (_) {}
-
-  // 4) legacy difficult terrain (feature retired, but old marks may linger)
-  try {
-    const h = pixelToHex(p);
-    const set = await getTerrainSet();
-    if (set.has(`${h.q},${h.r}`)) {
-      await removeTerrainHex(h);
-      const next = await getTerrainSet();
-      await renderTerrain([...next], keyToHex);
+    const all = await OBR.scene.items.getItems((i) => i.metadata?.[META]?.kind === "template");
+    const hit = all.filter((i) => i.createdUserId === me && near(i));
+    if (hit.length) {
+      const groups = new Set(hit.map((i) => i.metadata?.[META]?.group).filter(Boolean));
+      const doomed = all.filter(
+        (i) => i.createdUserId === me && (groups.has(i.metadata?.[META]?.group) || hit.includes(i))
+      );
+      await OBR.scene.items.deleteItems(doomed.map((i) => i.id));
       return true;
     }
   } catch (_) {}
@@ -373,8 +435,8 @@ export async function registerTool() {
   });
 
   await OBR.tool.createMode(blastMode(iconUrl("blast.svg")));
-  await OBR.tool.createMode(directionalMode("cone", iconUrl("cone.svg"), hexCone));
-  await OBR.tool.createMode(directionalMode("line", iconUrl("line.svg"), hexLine));
+  await OBR.tool.createMode(directionalMode("cone", iconUrl("cone.svg"), hexCone, true));
+  await OBR.tool.createMode(directionalMode("line", iconUrl("line.svg"), hexLine, false));
 
   await OBR.tool.createMode({
     id: MODES.erase,
@@ -383,35 +445,6 @@ export async function registerTool() {
     async onToolClick(_ctx, ev) {
       await eraseAt(ev.pointerPosition);
     },
-  });
-
-  // drag-the-lattice alignment mode (armed from the MAP tab)
-  let offsetStart = null;
-  await OBR.tool.createMode({
-    id: MODES.offset,
-    icons: [{ icon: iconUrl("move.svg"), label: "Drag Offset", filter: { activeTools: [TOOL] } }],
-    cursors: [{ cursor: "grab" }],
-    async onToolDragStart(_ctx, ev) {
-      offsetStart = { p: ev.pointerPosition, n: { ...grid.nudge } };
-    },
-    async onToolDragMove(_ctx, ev) {
-      if (!offsetStart) return;
-      setNudge(
-        offsetStart.n.x + ev.pointerPosition.x - offsetStart.p.x,
-        offsetStart.n.y + ev.pointerPosition.y - offsetStart.p.y
-      );
-      offsetCb?.(false);
-    },
-    async onToolDragEnd(_ctx, ev) {
-      if (!offsetStart) return;
-      setNudge(
-        offsetStart.n.x + ev.pointerPosition.x - offsetStart.p.x,
-        offsetStart.n.y + ev.pointerPosition.y - offsetStart.p.y
-      );
-      offsetStart = null;
-      offsetCb?.(true);
-    },
-    onToolDragCancel() { offsetStart = null; },
   });
 
   registered = true;

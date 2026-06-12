@@ -135,7 +135,7 @@
       /* tooltip */
       #tooltip { position: fixed; z-index: 99; max-width: 310px; background: var(--navy); border: 1px solid var(--lavender); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.6); pointer-events: none; display: none; }
       #tooltip .tt-head { background: var(--lavender); color: #16213e; font-weight: 700; font-size: 11px; letter-spacing: 1px; padding: 5px 9px; border-radius: 5px 5px 0 0; text-transform: uppercase; }
-      #tooltip .tt-body { padding: 8px 10px; font-size: 11.5px; line-height: 1.45; color: #dfe4f5; max-height: 220px; overflow: hidden; }
+      #tooltip .tt-body { padding: 8px 10px; font-size: 11.5px; line-height: 1.45; color: #dfe4f5; max-height: 46vh; overflow: hidden; transition: opacity 0.35s; }
 
       /* ---------- dice ---------- */
       .dice-area { display: flex; gap: 6px; align-items: stretch; }
@@ -190,8 +190,9 @@
       #resultclear:hover { color: #fff; border-color: var(--crimson); }
       #remote-banner { position: absolute; top: 10px; right: 10px; z-index: 5; display: none; background: rgba(10,12,16,0.9); border: 1px solid var(--tech); border-radius: 6px; color: var(--tech); font-family: var(--mono); font-size: 10px; padding: 4px 8px; }
 
-      /* ROLL / CLEAR live INSIDE the tray window, pinned to its bottom edge */
-      #trayui { position: absolute; bottom: 8px; left: 8px; right: 8px; display: flex; gap: 6px; z-index: 5; }
+      /* ROLL / CLEAR ride the bottom of the tray — STICKY, so at big zoom
+         they're visible immediately and settle into place as you scroll */
+      #trayui { position: sticky; bottom: 10px; display: flex; gap: 6px; z-index: 5; margin: -54px 8px 8px; }
       #rolldice { flex: 2; font-size: 14px; letter-spacing: 3px; padding: 9px; background: rgba(163,38,48,0.92); }
       #cleardice { flex: 1; background: rgba(35,40,50,0.88); border: 1px solid var(--line); }
 
@@ -231,6 +232,17 @@
       #vis-toggle.all { color: var(--good); }
 
       /* ---------- MISSION//CONTROL (GM) ---------- */
+      .gm-tabs { position: relative; display: flex; gap: 4px; justify-content: space-between; margin-bottom: 10px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+      .gm-tab { position: relative; z-index: 1; padding: 5px 8px; cursor: pointer; letter-spacing: 0.5px; white-space: nowrap; }
+      .gm-tab.sel { color: #bfeaff; }
+      .gm-holo { position: absolute; top: 0; height: 100%; border: 1px solid rgba(126, 230, 255, 0.55); background: rgba(63, 167, 214, 0.14); border-radius: 4px; box-shadow: 0 0 10px rgba(126, 230, 255, 0.25), inset 0 0 12px rgba(126, 230, 255, 0.12); transition: left 0.35s cubic-bezier(0.4, 0, 0.2, 1), width 0.35s cubic-bezier(0.4, 0, 0.2, 1); pointer-events: none; }
+      .npc-form { background: var(--panel); border: 1px solid var(--tech); padding: 10px; margin-bottom: 10px; }
+      .npc-card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--heatred); margin-bottom: 8px; padding: 8px 10px; }
+      .npc-card .nc-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+      .npc-card .nc-name { font-weight: 700; font-size: 14px; letter-spacing: 1px; text-transform: uppercase; overflow-wrap: anywhere; }
+      .npc-card .nc-tier { color: var(--gold); font-size: 10px; font-family: var(--mono); }
+      .npc-card .nc-actions { margin-left: auto; display: flex; gap: 4px; }
+      .npc-card .nc-notes { color: var(--muted); font-size: 11px; font-family: var(--mono); margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
       .gm-note { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-bottom: 10px; line-height: 1.5; }
       .lancer-card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--tech); margin-bottom: 8px; }
       .lancer-card .lc-head { display: flex; align-items: baseline; gap: 8px; padding: 8px 10px 4px; flex-wrap: wrap; }
@@ -245,8 +257,13 @@
       .lc-bar .fill { position: absolute; inset: 0; right: auto; background: var(--hpblue); }
       .lc-bar.heat .fill { background: var(--heatred); }
       .lc-barrow .v { width: 58px; font-family: var(--mono); font-size: 10px; }
-      .lc-pips { display: flex; gap: 12px; padding: 0 10px 8px; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+      .lc-pips { display: flex; gap: 12px; padding: 0 10px 8px; font-family: var(--mono); font-size: 10px; color: var(--muted); flex-wrap: wrap; }
+      .lc-pips span { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
       .lc-pips b { color: var(--text); }
+      .lc-sub { width: 100%; display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+      .lc-sub .lc-player { margin-left: 0; }
+      .lancer-card { cursor: pointer; }
+      .lc-bars .segbar { padding: 0; }
       .lc-detail { display: block; border-top: 1px solid var(--line); padding: 8px 10px; }
       .lc-stale { opacity: 0.45; }
       .gm-empty { color: var(--muted); font-family: var(--mono); font-size: 11px; padding: 20px; text-align: center; border: 1px dashed var(--line); }
@@ -257,7 +274,7 @@
       <header>
         <img id="hdr-icon" src="./icons/tool.svg" alt="mode" title="Toggle MISSION//CONTROL (GM view)" onerror="this.style.display='none'" />
         <h1 id="hdr-title">LANCER<span class="slash">//</span>UPLINK</h1>
-        <span class="ver">v2.6.0</span>
+        <span class="ver">v2.7.0</span>
         <span id="conn-dot" title="Owlbear link status"></span>
       </header>
       <nav class="tabs" id="tabnav">
@@ -432,7 +449,10 @@
               <button id="vis-toggle" class="all" title="Who sees weapon templates you place">👁 TEMPLATES: ALL PLAYERS</button>
             </div>
             <div class="row">
+              <button id="btn-undo-tmpl" class="btn ghost small" title="Remove the last template you placed">↶ UNDO LAST</button>
               <button id="clearmine" class="btn ghost small">CLEAR MY TEMPLATES</button>
+            </div>
+            <div class="row" style="margin-top:6px">
               <button id="clearranges" class="btn ghost small">CLEAR MY RANGE FIELDS</button>
             </div>
           </div>
@@ -466,7 +486,7 @@
               <label style="margin:4px 0 2px">Y</label>
               <input id="nudge-y" type="range" min="-300" max="300" step="2" value="0" style="width:100%" />
             </div>
-            <button id="btn-dragoffset" class="btn ghost small" style="margin-top:8px;width:100%" title="With a range field up: drag anywhere on the map to slide it into place">✥ CLICK-DRAG OFFSET</button>
+            <button id="btn-dragoffset" class="btn ghost small" style="margin-top:8px;width:100%" disabled title="With a range field up: grab the field on the map and drag it into place">✥ CLICK-DRAG OFFSET: OFF</button>
             <button id="btn-fit" class="btn blue small" style="margin-top:8px;width:100%" title="Re-probe the scene's grid and match tile size & orientation to it">⌖ FIT TO SCENE</button>
           </div>
         </details>
@@ -488,8 +508,49 @@
 
       <!-- ================== MISSION//CONTROL: LANCERS (GM) ================== -->
       <section id="tab-lancers" class="tabpane">
-        <div class="gm-note">LIVE SQUAD TELEMETRY</div>
+        <div class="gm-tabs" id="gm-tabs">
+          <div class="gm-holo" id="gm-holo"></div>
+          <span class="gm-tab sel" id="gmtab-squad">LIVE SQUAD TELEMETRY</span>
+          <span class="gm-tab" id="gmtab-field">LIVE FIELD TELEMETRY</span>
+        </div>
+
         <div id="squad"></div>
+
+        <div id="field" class="hidden">
+          <p class="muted" style="margin:0 0 8px; line-height:1.5">NPC roster — stored on YOUR machine only. Players never see this.</p>
+          <div class="row" style="margin-bottom:8px">
+            <button id="npc-add" class="btn blue small">+ ADD NPC</button>
+            <label class="btn ghost small" style="text-align:center">IMPORT JSON<input id="npc-import" type="file" accept=".json,application/json" hidden /></label>
+            <button id="npc-clear" class="btn ghost small">CLEAR ALL</button>
+          </div>
+
+          <div id="npc-form" class="npc-form hidden">
+            <input type="hidden" id="nf-id" />
+            <div class="row">
+              <div style="flex:2"><label>Name</label><input id="nf-name" type="text" placeholder="Ultra Berserker" /></div>
+              <div><label>Tier</label><input id="nf-tier" type="text" placeholder="T1" /></div>
+            </div>
+            <div class="row" style="margin-top:6px">
+              <div><label>HP</label><input id="nf-hp" type="number" value="10" /></div>
+              <div><label>Heat cap</label><input id="nf-heat" type="number" value="6" /></div>
+              <div><label>Evasion</label><input id="nf-eva" type="number" value="8" /></div>
+            </div>
+            <div class="row" style="margin-top:6px">
+              <div><label>E-Def</label><input id="nf-edef" type="number" value="8" /></div>
+              <div><label>Speed</label><input id="nf-spd" type="number" value="4" /></div>
+              <div><label>Armor</label><input id="nf-arm" type="number" value="0" /></div>
+              <div><label>Save</label><input id="nf-save" type="number" value="10" /></div>
+            </div>
+            <label>Weapons / abilities / notes</label>
+            <textarea id="nf-notes" rows="3" style="width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--text); border-radius:4px; padding:6px 8px; font-family:var(--mono); font-size:12px"></textarea>
+            <div class="row" style="margin-top:8px">
+              <button id="nf-save-btn" class="btn blue small">SAVE NPC</button>
+              <button id="nf-cancel" class="btn ghost small">CANCEL</button>
+            </div>
+          </div>
+
+          <div id="npc-list"></div>
+        </div>
       </section>
     </main>
 

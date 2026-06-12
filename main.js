@@ -12,7 +12,7 @@
 //
 // Lancer rules note: GRIT applies to attack rolls only, never to damage.
 
-import { OBR, CH_ROLL3D, CH_STATUS } from "./sdk.js";
+import { OBR, CH_ROLL3D, CH_STATUS, META, buildShape } from "./sdk.js";
 import * as hex from "./hex.js";
 import * as tool from "./tool.js";
 import {
@@ -91,7 +91,7 @@ document.querySelectorAll("nav.tabs button").forEach((btn) => {
       t.classList.toggle("active", t.id === `tab-${tab}`)
     );
     if (tab === "dice") ensureDiceTray();
-    if (tab === "lancers") renderGM();
+    if (tab === "lancers") requestAnimationFrame(() => setGmView(gmView)); // re-render + holo position
   });
 });
 const diceTabActive = () =>
@@ -133,7 +133,7 @@ function setGmMode(on) {
     if (wasActive) firstBtn.click(); // re-route to the new pane
   }
   if (on) {
-    renderGM();
+    requestAnimationFrame(() => setGmView(gmView));
     requestSquadStatus();
   }
 }
@@ -160,6 +160,7 @@ function broadcastStatus() {
         mech: currentMech.name,
         frame: s.frameName,
         live: { ...live },
+        bondId: bond?.id || null, // lets the GM ping our token
         stats: {
           hpMax: s.hpMax, heatMax: s.heatMax,
           structureMax: s.structureMax, stressMax: s.stressMax,
@@ -185,25 +186,24 @@ function renderGM() {
   const now = Date.now();
   for (const e of entries) {
     const st = e.stats || {}, lv = e.live || {};
-    const bar = (cur, max, cls = "") => {
-      const pct = max ? Math.max(0, Math.min(100, (cur / max) * 100)) : 0;
-      return `<div class="lc-bar ${cls}"><div class="fill" style="width:${pct}%"></div></div>`;
-    };
     const pips = (cur, max) => "◆".repeat(Math.max(0, cur)) + "◇".repeat(Math.max(0, (max || 0) - (cur || 0)));
     // soft hyphens let marathon names ("Supercalifragilistic…") wrap with a
     // visible hyphen instead of running off the card edge
     const softWrap = (t) => String(t || "").replace(/(\S{10})(?=\S)/g, "$1­");
     const card = document.createElement("div");
     card.className = `lancer-card${now - (e.ts || 0) > 60000 ? " lc-stale" : ""}`;
+    card.title = e.bondId ? "Click to locate this lancer's token on the map" : "";
     card.innerHTML = `
       <div class="lc-head">
         <span class="lc-callsign">${softWrap(e.callsign) || "PILOT"}</span>
-        <span class="lc-mech">${softWrap(e.mech)} · ${softWrap(e.frame)}</span>
-        <span class="lc-player">${softWrap(e.who)} · LL${e.ll ?? "?"}</span>
+        <div class="lc-sub">
+          <span class="lc-mech">${softWrap(e.mech)} · ${softWrap(e.frame)}</span>
+          <span class="lc-player">${softWrap(e.who)} · LL${e.ll ?? "?"}</span>
+        </div>
       </div>
       <div class="lc-bars">
-        <div class="lc-barrow"><span class="k">HP</span>${bar(lv.hp, st.hpMax)}<span class="v">${lv.hp ?? "?"}/${st.hpMax ?? "?"}${lv.overshield ? ` (+${lv.overshield})` : ""}</span></div>
-        <div class="lc-barrow"><span class="k">HEAT</span>${bar(lv.heat, st.heatMax, "heat")}<span class="v">${lv.heat ?? "?"}/${st.heatMax ?? "?"}</span></div>
+        <div class="lc-barrow"><span class="k">HP</span>${segBar(lv.hp ?? 0, st.hpMax ?? 1, "var(--hpblue)")}<span class="v">${lv.hp ?? "?"}/${st.hpMax ?? "?"}${lv.overshield ? ` (+${lv.overshield})` : ""}</span></div>
+        <div class="lc-barrow"><span class="k">HEAT</span>${segBar(lv.heat ?? 0, st.heatMax ?? 1, "var(--heatred)")}<span class="v">${lv.heat ?? "?"}/${st.heatMax ?? "?"}</span></div>
       </div>
       <div class="lc-pips">
         <span>STRUCT <b>${pips(lv.structure, st.structureMax)}</b></span>
@@ -220,7 +220,229 @@ function renderGM() {
           <span>SIZE <b>${st.size ?? "?"}</b></span>
         </div>
       </div>`;
-    wrap.appendChild(card); // full stat readout is always visible — no click needed
+    if (e.bondId) card.addEventListener("click", () => pingToken(e.bondId)); // GM click-to-ping
+    wrap.appendChild(card);
+  }
+}
+
+// ---- GM click-to-ping: locate a lancer's bonded token --------------------------
+async function pingToken(tokenId) {
+  if (!obrReady || !tokenId) return;
+  try {
+    const items = await OBR.scene.items.getItems([tokenId]);
+    const it = items[0];
+    if (!it) return setStatus("That lancer's token isn't in this scene.", "status-err");
+    const p = it.position;
+    const r = (hex.grid.dpi || 150) * 2.2;
+    try {
+      await OBR.viewport.animateToBounds({ x: p.x - r * 2, y: p.y - r * 2, width: r * 4, height: r * 4 });
+    } catch (_) {}
+    // pulse a local ring on the token a few times
+    for (let k = 0; k < 3; k++) {
+      const ring = buildShape()
+        .shapeType("CIRCLE")
+        .position(p)
+        .width(r * (1 + k * 0.15))
+        .height(r * (1 + k * 0.15))
+        .fillOpacity(0)
+        .strokeColor("#7ee6ff")
+        .strokeOpacity(0.9)
+        .strokeWidth(8)
+        .layer("POINTER")
+        .locked(true)
+        .disableHit(true)
+        .metadata({ [META]: { kind: "ping" } })
+        .build();
+      await OBR.scene.local.addItems([ring]);
+      await new Promise((res) => setTimeout(res, 280));
+      await OBR.scene.local.deleteItems([ring.id]).catch?.(() => {});
+    }
+  } catch (e) {
+    console.warn("[LANCER//UPLINK] ping failed", e);
+  }
+}
+
+// ====================================================== FIELD TELEMETRY (NPCs) ==
+// GM-side NPC roster — stored ONLY in this browser's localStorage, never
+// broadcast, so players can't see it even by accident.
+const NPC_KEY = "lancer-uplink/npcs/v1";
+let npcs = [];
+try { npcs = JSON.parse(localStorage.getItem(NPC_KEY) || "[]") || []; } catch (_) { npcs = []; }
+function saveNpcs() {
+  try { localStorage.setItem(NPC_KEY, JSON.stringify(npcs)); } catch (_) {}
+}
+
+// SQUAD / FIELD holo tab slider
+let gmView = "squad";
+function setGmView(which) {
+  gmView = which;
+  $("gmtab-squad")?.classList.toggle("sel", which === "squad");
+  $("gmtab-field")?.classList.toggle("sel", which === "field");
+  $("squad")?.classList.toggle("hidden", which !== "squad");
+  $("field")?.classList.toggle("hidden", which !== "field");
+  // slide the holographic selector over the active label
+  const tab = $(which === "squad" ? "gmtab-squad" : "gmtab-field");
+  const holo = $("gm-holo");
+  if (tab && holo) {
+    holo.style.left = `${tab.offsetLeft}px`;
+    holo.style.width = `${tab.offsetWidth}px`;
+  }
+  if (which === "field") renderNpcs();
+  if (which === "squad") renderGM();
+}
+$("gmtab-squad")?.addEventListener("click", () => setGmView("squad"));
+$("gmtab-field")?.addEventListener("click", () => setGmView("field"));
+
+// ---- NPC form ----------------------------------------------------------------------
+function openNpcForm(npc) {
+  $("npc-form")?.classList.remove("hidden");
+  $("nf-id").value = npc?.id || "";
+  $("nf-name").value = npc?.name || "";
+  $("nf-tier").value = npc?.tier || "";
+  $("nf-hp").value = npc?.hpMax ?? 10;
+  $("nf-heat").value = npc?.heatMax ?? 6;
+  $("nf-eva").value = npc?.evasion ?? 8;
+  $("nf-edef").value = npc?.edef ?? 8;
+  $("nf-spd").value = npc?.speed ?? 4;
+  $("nf-arm").value = npc?.armor ?? 0;
+  $("nf-save").value = npc?.save ?? 10;
+  $("nf-notes").value = npc?.features || "";
+  $("nf-name")?.focus();
+}
+function closeNpcForm() { $("npc-form")?.classList.add("hidden"); }
+
+$("npc-add")?.addEventListener("click", () => openNpcForm(null));
+$("nf-cancel")?.addEventListener("click", closeNpcForm);
+$("nf-save-btn")?.addEventListener("click", () => {
+  const id = $("nf-id").value || `npc-${Date.now()}`;
+  const num = (el, dflt) => { const v = Number($(el)?.value); return Number.isFinite(v) ? v : dflt; };
+  const existing = npcs.find((n) => n.id === id);
+  const base = existing || { id, hp: null, heat: 0 };
+  const next = {
+    ...base,
+    name: $("nf-name").value.trim() || "NPC",
+    tier: $("nf-tier").value.trim(),
+    hpMax: Math.max(1, num("nf-hp", 10)),
+    heatMax: Math.max(0, num("nf-heat", 6)),
+    evasion: num("nf-eva", 8),
+    edef: num("nf-edef", 8),
+    speed: num("nf-spd", 4),
+    armor: num("nf-arm", 0),
+    save: num("nf-save", 10),
+    features: $("nf-notes").value.trim(),
+  };
+  if (next.hp == null || next.hp > next.hpMax) next.hp = next.hpMax;
+  if (!existing) npcs.push(next);
+  else Object.assign(existing, next);
+  saveNpcs();
+  closeNpcForm();
+  renderNpcs();
+});
+
+$("npc-clear")?.addEventListener("click", () => {
+  if (!npcs.length) return;
+  if (!window.confirm(`Delete ALL ${npcs.length} NPCs? This cannot be undone.`)) return;
+  npcs = [];
+  saveNpcs();
+  renderNpcs();
+});
+
+// best-effort COMP/CON-ish NPC import: accepts an array or single object and
+// maps the common stat fields; anything unrecognised lands in the notes.
+$("npc-import")?.addEventListener("change", async (ev) => {
+  const file = ev.target.files?.[0];
+  if (!file) return;
+  try {
+    const json = JSON.parse(await file.text());
+    const list = Array.isArray(json) ? json : Array.isArray(json?.npcs) ? json.npcs : [json];
+    let added = 0;
+    for (const o of list) {
+      if (!o || typeof o !== "object") continue;
+      const s = o.stats || o;
+      const featureNames = []
+        .concat(o.items || [], o.features || [], o.systems || [], o.weapons || [])
+        .map((x) => (typeof x === "string" ? x : x?.name || x?.id || ""))
+        .filter(Boolean);
+      npcs.push({
+        id: `npc-${Date.now()}-${added}`,
+        name: o.name || o.npc?.name || "Imported NPC",
+        tier: String(o.tier ?? s.tier ?? ""),
+        hpMax: Number(s.hp ?? s.max_hp ?? s.hp_max ?? 10) || 10,
+        hp: Number(s.hp ?? s.max_hp ?? 10) || 10,
+        heatMax: Number(s.heatcap ?? s.heat_cap ?? s.heat ?? 6) || 6,
+        heat: 0,
+        evasion: Number(s.evasion ?? s.evade ?? 8) || 8,
+        edef: Number(s.edef ?? s.e_def ?? 8) || 8,
+        speed: Number(s.speed ?? 4) || 4,
+        armor: Number(s.armor ?? 0) || 0,
+        save: Number(s.save ?? 10) || 10,
+        features: featureNames.join(", ") || (o.notes || ""),
+      });
+      added++;
+    }
+    saveNpcs();
+    renderNpcs();
+    setStatus(added ? `Imported ${added} NPC${added === 1 ? "" : "s"}.` : "No NPCs found in that file.", added ? "status-ok" : "status-err");
+  } catch (e) {
+    setStatus(`NPC import failed: ${e.message || e}`, "status-err");
+  }
+  ev.target.value = "";
+});
+
+// ---- NPC cards: same telemetry styling as the lancers --------------------------------
+function renderNpcs() {
+  const wrap = $("npc-list");
+  if (!wrap) return;
+  if (!npcs.length) {
+    wrap.innerHTML = `<div class="gm-empty">NO HOSTILES LOGGED.<br/>ADD NPC or import a JSON file.</div>`;
+    return;
+  }
+  wrap.innerHTML = "";
+  for (const n of npcs) {
+    const card = document.createElement("div");
+    card.className = "npc-card";
+    card.innerHTML = `
+      <div class="nc-head">
+        <span class="nc-name">${n.name}</span>
+        ${n.tier ? `<span class="nc-tier">${n.tier}</span>` : ""}
+        <span class="nc-actions">
+          <button class="btn ghost small" data-act="edit">EDIT</button>
+          <button class="btn ghost small" data-act="del">✕</button>
+        </span>
+      </div>
+      <div class="lc-barrow"><span class="k">HP</span>${segBar(n.hp, n.hpMax, "var(--hpblue)")}<span class="v">${n.hp}/${n.hpMax}</span>
+        <button class="pp" data-act="hp" data-d="-1">−</button><button class="pp" data-act="hp" data-d="1">+</button></div>
+      <div class="lc-barrow"><span class="k">HEAT</span>${segBar(n.heat, Math.max(1, n.heatMax), "var(--heatred)")}<span class="v">${n.heat}/${n.heatMax}</span>
+        <button class="pp" data-act="heat" data-d="-1">−</button><button class="pp" data-act="heat" data-d="1">+</button></div>
+      <div class="lc-pips" style="padding:4px 0 0">
+        <span>EVA <b>${n.evasion}</b></span><span>E-DEF <b>${n.edef}</b></span>
+        <span>SPD <b>${n.speed}</b></span><span>ARMOR <b>${n.armor}</b></span>
+        <span>SAVE <b>${n.save}</b></span>
+      </div>
+      ${n.features ? `<div class="nc-notes">${n.features}</div>` : ""}`;
+    card.querySelector('[data-act="edit"]').addEventListener("click", () => openNpcForm(n));
+    const del = card.querySelector('[data-act="del"]');
+    del.addEventListener("click", () => {
+      if (del.dataset.armed) {
+        npcs = npcs.filter((x) => x.id !== n.id);
+        saveNpcs();
+        renderNpcs();
+      } else {
+        del.dataset.armed = "1";
+        del.textContent = "SURE?";
+        setTimeout(() => { delete del.dataset.armed; del.textContent = "✕"; }, 2500);
+      }
+    });
+    card.querySelectorAll(".pp[data-act]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const k = b.dataset.act, d = Number(b.dataset.d);
+        if (k === "hp") n.hp = Math.max(0, Math.min(n.hpMax, n.hp + d));
+        if (k === "heat") n.heat = Math.max(0, Math.min(n.heatMax, n.heat + d));
+        saveNpcs();
+        renderNpcs();
+      });
+    });
+    wrap.appendChild(card);
   }
 }
 
@@ -438,13 +660,14 @@ const fieldColor = (kind) =>
 
 async function placeFieldAt(kind, center, size, boost, label) {
   if (boost) {
-    await showBoostField("field-boost", center, size, { color: fieldColor(kind), name: `Boost ${size}` });
+    await showBoostField("field-boost", center, size, { color: fieldColor(kind), name: `Boost ${size}`, draggable: offsetDragMode });
   } else {
     await showLocalOverlay(`field-${kind}`, hex.hexesInRange(center, size, true), {
       color: fieldColor(kind),
       fillOpacity: 0.18, strokeOpacity: 0.85, strokeWidth: 3,
       name: label || `${kind === "sensors" ? "Sensors" : kind === "weapon" ? "Range" : "Move"} ${size}`,
       kind: "range",
+      draggable: offsetDragMode, // CLICK-DRAG OFFSET mode makes fields grabbable
     });
   }
 }
@@ -513,6 +736,7 @@ function markMobilityActive() {
   document.querySelectorAll('[data-mob="sensors"]').forEach((b) => {
     b.classList.toggle("on", !!activeFields.sensors);
   });
+  updateDragOffsetBtn(); // offset toggle availability tracks the fields
 }
 
 // ---- MOVE & SENSORS row (above the stat blocks, below the name) --------------
@@ -937,10 +1161,50 @@ function renderTalentChips() {
 
 // ---- tooltip --------------------------------------------------------------------
 const tipEl = $("tooltip");
+let tipScrollRaf = 0;
+let tipScrollTimer = 0;
+
+function stopTipScroll() {
+  cancelAnimationFrame(tipScrollRaf);
+  clearTimeout(tipScrollTimer);
+  const b = $("tt-body");
+  if (b) { b.scrollTop = 0; b.style.opacity = "1"; }
+}
+
+// If the text outgrows the (already enlarged) box, wait a beat, scroll through
+// leisurely, pause at the end, fade out, and loop back to the top.
+function startTipScroll() {
+  const b = $("tt-body");
+  if (!b || b.scrollHeight <= b.clientHeight + 4) return;
+  const cycle = () => {
+    tipScrollTimer = setTimeout(() => {
+      const step = () => {
+        b.scrollTop += 0.45; // leisurely
+        if (b.scrollTop + b.clientHeight < b.scrollHeight - 1) {
+          tipScrollRaf = requestAnimationFrame(step);
+        } else {
+          tipScrollTimer = setTimeout(() => {
+            b.style.opacity = "0";
+            tipScrollTimer = setTimeout(() => {
+              b.scrollTop = 0;
+              b.style.opacity = "1";
+              cycle();
+            }, 380);
+          }, 1300);
+        }
+      };
+      tipScrollRaf = requestAnimationFrame(step);
+    }, 1000);
+  };
+  cycle();
+}
+
 function showTip(head, body, ev) {
   $("tt-head").textContent = head;
   $("tt-body").textContent = body || "";
   tipEl.style.display = "block";
+  stopTipScroll();
+  startTipScroll();
   moveTooltip(ev);
 }
 function moveTooltip(ev) {
@@ -952,7 +1216,10 @@ function moveTooltip(ev) {
   tipEl.style.left = `${Math.max(4, x)}px`;
   tipEl.style.top = `${Math.max(4, y)}px`;
 }
-function hideTooltip() { tipEl.style.display = "none"; }
+function hideTooltip() {
+  tipEl.style.display = "none";
+  stopTipScroll();
+}
 
 // ============================================================== DICE SYSTEM ====
 let diceTray = null;
@@ -979,11 +1246,15 @@ function setContext(label, kind = "free", followUp = null) {
 }
 function clearContext() { setContext("", "free", null); }
 
+// ROLL QUEUE — counts pending ROLLS (one per player roll), not dice. When the
+// table all rolls at once, replays line up and play one after another.
+let replayQueue = [];
+let replayActive = false;
 function updateAdvCount() {
   const el = $("advcount");
   if (!el) return;
-  const n = trayQueue.length;
-  el.textContent = n === 1 ? "1 die queued" : `${n} dice queued`;
+  const n = replayQueue.length + (replayActive || diceBusy ? 1 : 0);
+  el.textContent = n === 1 ? "1 roll queued" : `${n} rolls queued`;
 }
 
 // Single shared init promise — fixes the "first target-lock lands on an empty
@@ -1054,9 +1325,14 @@ function recolorDicePicker() {
   document.querySelectorAll('#dicepicker .die-btn[data-die]').forEach((btn) => {
     btn.innerHTML = dieIconSvg(btn.dataset.die, body);
   });
+  // Accuracy: green pointy-top hexagon with a plus. Difficulty: red, minus.
+  const hexIcon = (color, glyph) => `<svg viewBox="0 0 40 40">
+    <polygon points="20,2 35,11 35,29 20,38 5,29 5,11" fill="${color}" stroke="rgba(255,255,255,0.55)" stroke-width="1.5" stroke-linejoin="round"/>
+    <text x="20" y="27" text-anchor="middle" font-size="20" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#ffffff">${glyph}</text>
+  </svg>`;
   const acc = $("addadv"), dis = $("adddis");
-  if (acc) acc.innerHTML = dieIconSvg("d6", "#1d4ed8").replace(">6<", ">A<");
-  if (dis) dis.innerHTML = dieIconSvg("d6", "#5b21b6").replace(">6<", ">D<");
+  if (acc) acc.innerHTML = hexIcon("#2f7d49", "+");
+  if (dis) dis.innerHTML = hexIcon("#a32630", "−");
 }
 recolorDicePicker(); // initial paint with the default scheme colour
 
@@ -1064,9 +1340,8 @@ function addQueued(type, role = "normal", as = null, pair = null) {
   if (!diceTray || diceBusy) return;
   diceTray.addDie(type, role);
   trayQueue.push({ type, role, as, pair });
-  diceTray.stageView(); // close-up on the hovering dice while you build the pool
+  diceTray.resetCamera(); // home view while building the pool; zooms come with the roll
   hideResult();
-  updateAdvCount();
 }
 
 function clearTrayAll() {
@@ -1268,6 +1543,7 @@ const effVal = (meta, v) => (meta?.as === "d3" ? Math.ceil(v / 2) : v);
 async function doRoll() {
   if (!diceTray || diceBusy || !trayQueue.length) return;
   diceBusy = true;
+  updateAdvCount(); // our own roll occupies the queue
   const rollBtn = $("rolldice");
   rollBtn?.classList.add("rolling");
   try {
@@ -1421,14 +1697,13 @@ async function doRoll() {
     rollBtn?.classList.remove("rolling");
     diceBusy = false;
     updateAdvCount();
+    if (replayQueue.length) setTimeout(pumpReplayQueue, 4000); // let our result breathe
   }
 }
 $("rolldice")?.addEventListener("click", doRoll);
 
 // ---- remote replays ----------------------------------------------------------------
-let remoteCleanup = 0;
-
-async function onRemoteRoll(d) {
+function onRemoteRoll(d) {
   logRoll({
     kind: d.kind === "dmg" ? "dmg" : d.kind === "tech" ? "tech" : d.kind === "sys" ? "sys" : "atk",
     remote: true,
@@ -1439,31 +1714,50 @@ async function onRemoteRoll(d) {
   });
   try { OBR.notification.show(`${d.who}: ${d.label} → ${d.total}`, "INFO"); } catch (_) {}
 
-  if (!diceTabActive()) return;
-  await ensureDiceTray();
-  if (!diceTray || diceBusy || diceTray.isRolling()) return;
+  if (!diceTabActive()) return; // tab closed — log + notification suffice
+  replayQueue.push(d);
+  updateAdvCount();
+  pumpReplayQueue();
+}
 
-  clearTimeout(remoteCleanup);
-  const banner = $("remote-banner");
-  banner.textContent = `▸ ${d.who} ROLLS…`;
-  banner.style.display = "block";
-  trayQueue = []; // the replay owns the tray now
-  await diceTray.replay(d.dice || [], 1, d.scheme || null); // roller's colours
-  diceTray.zoomToDice();
-  showResult({
-    total: d.total,
-    sub: `${d.who} — ${d.kind === "dmg" ? "DAMAGE" : d.kind === "tech" ? "TECH" : d.kind === "sys" ? "CHECK" : "ACCURACY"}`,
-    kind: d.kind === "sys" ? "atk" : d.kind || "atk",
-    crit: d.crit || "",
-  });
-  remoteCleanup = setTimeout(() => {
-    if (diceBusy || diceTray.isRolling()) return;
-    diceTray.clearTray();
-    trayQueue = [];
-    hideResult();
-    diceTray.resetCamera();
+async function pumpReplayQueue() {
+  if (replayActive || diceBusy) return;
+  if (diceTray && diceTray.isRolling()) { setTimeout(pumpReplayQueue, 600); return; }
+  const d = replayQueue.shift();
+  if (!d) return;
+  replayActive = true;
+  updateAdvCount();
+  try {
+    await ensureDiceTray();
+    if (!diceTray) return;
+    const banner = $("remote-banner");
+    banner.textContent = `▸ ${d.who} ROLLS…`;
+    banner.style.display = "block";
+    trayQueue = []; // the replay owns the tray now
+    await diceTray.replay(d.dice || [], 1, d.scheme || null); // roller's colours
+    diceTray.zoomToDice();
+    showResult({
+      total: d.total,
+      sub: `${d.who} — ${d.kind === "dmg" ? "DAMAGE" : d.kind === "tech" ? "TECH" : d.kind === "sys" ? "CHECK" : "ACCURACY"}`,
+      kind: d.kind === "sys" ? "atk" : d.kind || "atk",
+      crit: d.crit || "",
+    });
+    // hold the result a beat, then clean up for the next roll in the queue
+    await new Promise((r) => setTimeout(r, replayQueue.length ? 2800 : 4500));
+    if (!diceBusy && diceTray && !diceTray.isRolling()) {
+      diceTray.clearTray();
+      trayQueue = [];
+      hideResult();
+      diceTray.resetCamera();
+    }
     banner.style.display = "none";
-  }, 4500);
+  } catch (e) {
+    console.warn("[LANCER//UPLINK] replay failed", e);
+  } finally {
+    replayActive = false;
+    updateAdvCount();
+    if (replayQueue.length) pumpReplayQueue();
+  }
 }
 
 // ---- roll log -------------------------------------------------------------------------
@@ -1494,6 +1788,10 @@ visBtn?.addEventListener("click", () => {
   saveState();
 });
 
+$("btn-undo-tmpl")?.addEventListener("click", async () => {
+  const ok = await tool.undoLastTemplate();
+  setStatus(ok ? "Last template removed." : "Nothing left to undo.", ok ? "status-ok" : "status-err");
+});
 $("clearmine")?.addEventListener("click", async () => {
   try { await clearMyTemplates(); await clearLocalTemplates(); }
   catch (e) { console.warn("[LANCER//UPLINK] clear templates failed", e); }
@@ -1541,18 +1839,19 @@ $("btn-fit")?.addEventListener("click", async () => {
 
 // Re-place every active range field in place — makes grid tweaks (offset,
 // tile size) update LIVE instead of needing a sensors off/on cycle.
+async function refreshActiveFieldsNow() {
+  if (!Object.keys(activeFields).length) return;
+  const item = await getBondItem();
+  if (!item) return;
+  const c = hex.pixelToHex(item.position);
+  for (const [kind, f] of Object.entries(activeFields)) {
+    await placeFieldAt(kind, c, f.size, f.boost);
+  }
+}
 let refreshFieldsTimer = 0;
 function refreshActiveFields() {
   clearTimeout(refreshFieldsTimer);
-  refreshFieldsTimer = setTimeout(async () => {
-    if (!Object.keys(activeFields).length) return;
-    const item = await getBondItem();
-    if (!item) return;
-    const c = hex.pixelToHex(item.position);
-    for (const [kind, f] of Object.entries(activeFields)) {
-      await placeFieldAt(kind, c, f.size, f.boost);
-    }
-  }, 120);
+  refreshFieldsTimer = setTimeout(refreshActiveFieldsNow, 120);
 }
 
 // manual lattice offset — steppers shift by ⅛ tile; slider mode for sweeps
@@ -1598,27 +1897,53 @@ function applyUiScale() {
   if (v) v.textContent = `${Math.round(uiScale * 100)}%`;
   diceTray?.resize(); // the tray canvas needs to know about the new layout size
 }
-$("font-minus")?.addEventListener("click", () => { uiScale -= 0.05; applyUiScale(); saveState(); });
-$("font-plus")?.addEventListener("click", () => { uiScale += 0.05; applyUiScale(); saveState(); });
+// Keep the page pinned to the bottom while resizing so the A+/A− buttons
+// don't drift off-screen between clicks.
+function fontStep(delta) {
+  uiScale += delta;
+  applyUiScale();
+  saveState();
+  requestAnimationFrame(() =>
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" })
+  );
+}
+$("font-minus")?.addEventListener("click", () => fontStep(-0.05));
+$("font-plus")?.addEventListener("click", () => fontStep(0.05));
 $("font-reset")?.addEventListener("click", () => { uiScale = 1; applyUiScale(); saveState(); });
 
-// ---- click-drag offset: arm the lattice-drag tool mode -------------------------
+// ---- click-drag offset: the FIELDS THEMSELVES become draggable -----------------
+// Owlbear's own move tool drags them (perfectly smooth), siblings follow live,
+// and the displacement commits into the grid offset on release.
+let offsetDragMode = false;
+let offsetCommitTimer = 0;
+let offsetCommitting = false;
+
+function updateDragOffsetBtn() {
+  const b = $("btn-dragoffset");
+  if (!b) return;
+  const has = Object.keys(activeFields).length > 0;
+  if (!has && offsetDragMode) setOffsetDrag(false); // auto-disable, stays off until clicked
+  b.disabled = !has;
+  b.textContent = `✥ CLICK-DRAG OFFSET: ${offsetDragMode ? "ON" : "OFF"}`;
+  b.classList.toggle("blue", offsetDragMode);
+  b.classList.toggle("ghost", !offsetDragMode);
+}
+
+async function setOffsetDrag(on) {
+  offsetDragMode = on;
+  await refreshActiveFieldsNow(); // rebuild fields grabbable / locked
+  updateDragOffsetBtn();
+}
+
 $("btn-dragoffset")?.addEventListener("click", async () => {
-  if (!Object.keys(activeFields).length) {
-    setStatus("Put up a MOVE / SENSORS / RANGE field first, then drag it into place.", "status-err");
-    return; // nothing to align — the button deliberately does nothing
-  }
-  try {
-    await tool.activateMode("offset");
-    setStatus("Drag anywhere on the map to slide your fields into alignment.", "status-ok");
-  } catch (_) {
-    setStatus("Open a scene first.", "status-err");
-  }
-});
-tool.setOffsetCallback((final) => {
-  refreshNudgeVal();
-  refreshActiveFields();
-  if (final) saveState();
+  if (!Object.keys(activeFields).length) return; // deliberately inert
+  await setOffsetDrag(!offsetDragMode);
+  setStatus(
+    offsetDragMode
+      ? "Grab a range field on the map (with Owlbear's move tool) and drag it into place."
+      : "Fields locked back down.",
+    "status-ok"
+  );
 });
 
 function refreshGridReadout() {
@@ -1679,6 +2004,39 @@ async function start() {
           await placeFieldAt(kind, c, f.size, f.boost);
         }
       }, 250);
+    });
+  } catch (_) {}
+
+  // 3b) CLICK-DRAG OFFSET: when a field is dragged (Owlbear's own smooth item
+  // drag), shift its siblings live, then commit the displacement to the grid
+  // offset shortly after the drag stops.
+  try {
+    OBR.scene.local.onChange((items) => {
+      if (!offsetDragMode || offsetCommitting) return;
+      const moved = items.find(
+        (i) => i.metadata?.[META]?.kind === "range" && (i.position.x !== 0 || i.position.y !== 0)
+      );
+      if (!moved) return;
+      const d = { x: moved.position.x, y: moved.position.y };
+      // siblings follow live so the whole layout slides as one
+      const lagging = items.filter(
+        (i) => i.metadata?.[META]?.kind === "range" && i.id !== moved.id &&
+               (i.position.x !== d.x || i.position.y !== d.y)
+      );
+      if (lagging.length) {
+        OBR.scene.local.updateItems(lagging.map((i) => i.id), (its) => {
+          its.forEach((it) => { it.position = { ...d }; });
+        }).catch(() => {});
+      }
+      clearTimeout(offsetCommitTimer);
+      offsetCommitTimer = setTimeout(async () => {
+        offsetCommitting = true;
+        hex.setNudge(hex.grid.nudge.x + d.x, hex.grid.nudge.y + d.y);
+        refreshNudgeVal();
+        await refreshActiveFieldsNow(); // rebuild at position 0 with new offset
+        saveState();
+        offsetCommitting = false;
+      }, 350);
     });
   } catch (_) {}
 

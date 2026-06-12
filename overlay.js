@@ -35,6 +35,7 @@ export function buildHexOverlay(hexes, opts) {
     kind = "overlay",
     extra = {},
     layer = "DRAWING",
+    draggable = false, // offset-drag mode: fields become grabbable
   } = opts || {};
   return buildPath()
     .position({ x: 0, y: 0 })
@@ -46,8 +47,8 @@ export function buildHexOverlay(hexes, opts) {
     .strokeWidth(strokeWidth)
     .fillRule("evenodd")
     .layer(layer)
-    .locked(true)
-    .disableHit(true)
+    .locked(!draggable)
+    .disableHit(!draggable)
     .name(name)
     .metadata({ [META]: { kind, ...extra } })
     .build();
@@ -97,10 +98,12 @@ export async function showBoostField(slotBase, center, n, opts = {}) {
   await showLocalOverlay(`${slotBase}-in`, inner, {
     color, name: `${name} — move`, kind: "range",
     fillOpacity: 0.24, strokeOpacity: 0.95, strokeWidth: 5,
+    draggable: !!opts.draggable,
   });
   await showLocalOverlay(`${slotBase}-out`, outer, {
     color, name: `${name} — boost`, kind: "range",
     fillOpacity: 0.10, strokeOpacity: 0.45, strokeWidth: 2,
+    draggable: !!opts.draggable,
   });
 }
 

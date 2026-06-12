@@ -3,6 +3,28 @@
 Things that would make this tool genuinely great, roughly ordered by
 bang-for-buck.
 
+## Shipped in 2.7.0 ✓
+
+- ✓ FIELD TELEMETRY: GM-local NPC roster (add/edit/delete/import JSON,
+  HP/Heat trackers, clear-all confirm) behind a sliding holo tab
+- ✓ GM click-to-ping a lancer's bonded token (viewport fly + pulse rings)
+- ✓ Mission Control: pilot/LL left-aligned under the callsign; CompCon
+  segmented HP/Heat bars on cards
+- ✓ Templates: distance counter above the cursor while dragging, white
+  distance label on the farthest tile, line origin highlighted, UNDO LAST,
+  free-angle lines; grouped erase
+- ✓ Cone: vertex aims widened to 2/3/4 rows; edge aims untouched
+- ✓ Click-drag offset reworked: fields themselves become draggable (smooth),
+  siblings follow, offset commits on release; auto-disables with no fields
+- ✓ Stone dice (granite speckle, marble veins, low metalness) + subtle
+  impact audio with real weight; engravings inset per face (no d20 overlap)
+- ✓ Roll queue: one entry per roll; multiplayer replays play back-to-back
+- ✓ Camera order: add at home view → slight zoom on throw → result zoom
+- ✓ HORUS glitch is per-die (scheme switching can't retro-glitch old dice)
+- ✓ Acc/Dis picker icons: green hex +, red hex −
+- ✓ Tooltip auto-grows, then leisurely scroll-loops long text
+- ✓ A+/A− keeps the House Rules section pinned; sticky ROLL/CLEAR in the tray
+
 ## Shipped in 2.6.0 ✓
 
 - ✓ Cone slimmed one tile per side (boundary rails trimmed)
