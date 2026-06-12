@@ -32,6 +32,7 @@ import {
   hexToPixel,
   hexDistance,
   grid,
+  setNudge,
 } from "./hex.js";
 import {
   buildHexOverlay,
@@ -51,7 +52,14 @@ export const MODES = {
   cone: `${ID}/mode-cone`,
   line: `${ID}/mode-line`,
   erase: `${ID}/mode-erase`,
+  offset: `${ID}/mode-offset`,
 };
+
+// Click-drag offset: the panel arms this mode; dragging on the map slides the
+// whole lattice (and every active range field with it). The panel registers a
+// callback so fields re-render live and the offset persists.
+let offsetCb = null;
+export function setOffsetCallback(fn) { offsetCb = fn; }
 
 // Semantic shapes (drive colour + visibility). move/tech/weapon are panel-
 // armed only and use the blast mode for placement.
@@ -375,6 +383,35 @@ export async function registerTool() {
     async onToolClick(_ctx, ev) {
       await eraseAt(ev.pointerPosition);
     },
+  });
+
+  // drag-the-lattice alignment mode (armed from the MAP tab)
+  let offsetStart = null;
+  await OBR.tool.createMode({
+    id: MODES.offset,
+    icons: [{ icon: iconUrl("move.svg"), label: "Drag Offset", filter: { activeTools: [TOOL] } }],
+    cursors: [{ cursor: "grab" }],
+    async onToolDragStart(_ctx, ev) {
+      offsetStart = { p: ev.pointerPosition, n: { ...grid.nudge } };
+    },
+    async onToolDragMove(_ctx, ev) {
+      if (!offsetStart) return;
+      setNudge(
+        offsetStart.n.x + ev.pointerPosition.x - offsetStart.p.x,
+        offsetStart.n.y + ev.pointerPosition.y - offsetStart.p.y
+      );
+      offsetCb?.(false);
+    },
+    async onToolDragEnd(_ctx, ev) {
+      if (!offsetStart) return;
+      setNudge(
+        offsetStart.n.x + ev.pointerPosition.x - offsetStart.p.x,
+        offsetStart.n.y + ev.pointerPosition.y - offsetStart.p.y
+      );
+      offsetStart = null;
+      offsetCb?.(true);
+    },
+    onToolDragCancel() { offsetStart = null; },
   });
 
   registered = true;

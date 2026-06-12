@@ -250,22 +250,32 @@ export function hexLine(origin, rad, n) {
   return out;
 }
 
-// CONE n — a SOLID equilateral wedge: every cell within distance n whose
-// centre lies inside ±30° of the aim line (±45° on squares). Because hexes
-// interlock, this fills into the clean triangle from the rulebook art with
-// no holes. Aimed at a vertex it stays an isosceles triangle, hugging the
-// line as tightly as the lattice allows.
+// CONE n — a SOLID wedge, kept deliberately SLIM: cells strictly INSIDE the
+// ±30° aim window (±45° on squares), so the boundary "rails" that fattened
+// the silhouette are trimmed off — one tile thinner on both sides. If the
+// aim runs along a vertex the first ring would come up empty, so the two
+// straddling cells are restored to keep the cone attached to its origin.
 export function hexCone(origin, rad, n) {
   const o = hexToPixel(origin);
   const candidates = hexesInRange(origin, n, false);
-  const halfAngle = (grid.square ? Math.PI / 4 : Math.PI / 6) + 0.02;
+  const halfAngle = (grid.square ? Math.PI / 4 : Math.PI / 6) - 0.02;
   const out = [];
+  let hasD1 = false;
+  const base = []; // near-boundary distance-1 cells, kept only if needed
   for (const h of candidates) {
+    const d = hexDistance(origin, h);
+    if (d > n) continue;
     const p = hexToPixel(h);
     const ang = Math.atan2(p.y - o.y, p.x - o.x);
     let diff = Math.abs(ang - rad);
     if (diff > Math.PI) diff = 2 * Math.PI - diff;
-    if (diff <= halfAngle && hexDistance(origin, h) <= n) out.push(h);
+    if (diff <= halfAngle) {
+      out.push(h);
+      if (d === 1) hasD1 = true;
+    } else if (d === 1 && diff <= halfAngle + 0.08) {
+      base.push(h);
+    }
   }
+  if (!hasD1) out.push(...base);
   return out;
 }

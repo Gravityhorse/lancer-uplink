@@ -69,6 +69,7 @@ function saveState() {
         gridMode: $("grid-mode")?.value || "auto",
         cellSize: hex.grid.cellOverride,
         nudge: { ...hex.grid.nudge },
+        uiScale,
         macro: $("macro-toggle")?.checked || false,
         bond,
       }));
@@ -98,6 +99,10 @@ const diceTabActive = () =>
 
 function switchToDiceTab() {
   document.querySelector('nav.tabs button[data-tab="dice"]')?.click();
+  // land at the TOP of the dice tab with the combat log tucked away — no
+  // more arriving mid-log and scrolling up to find the tray
+  $("sec-log")?.removeAttribute("open");
+  window.scrollTo({ top: 0, behavior: "auto" });
 }
 
 // ====================================================== MISSION//CONTROL ======
@@ -185,13 +190,16 @@ function renderGM() {
       return `<div class="lc-bar ${cls}"><div class="fill" style="width:${pct}%"></div></div>`;
     };
     const pips = (cur, max) => "◆".repeat(Math.max(0, cur)) + "◇".repeat(Math.max(0, (max || 0) - (cur || 0)));
+    // soft hyphens let marathon names ("Supercalifragilistic…") wrap with a
+    // visible hyphen instead of running off the card edge
+    const softWrap = (t) => String(t || "").replace(/(\S{10})(?=\S)/g, "$1­");
     const card = document.createElement("div");
     card.className = `lancer-card${now - (e.ts || 0) > 60000 ? " lc-stale" : ""}`;
     card.innerHTML = `
       <div class="lc-head">
-        <span class="lc-callsign">${e.callsign || "PILOT"}</span>
-        <span class="lc-mech">${e.mech || ""} · ${e.frame || ""}</span>
-        <span class="lc-player">${e.who || ""} · LL${e.ll ?? "?"}</span>
+        <span class="lc-callsign">${softWrap(e.callsign) || "PILOT"}</span>
+        <span class="lc-mech">${softWrap(e.mech)} · ${softWrap(e.frame)}</span>
+        <span class="lc-player">${softWrap(e.who)} · LL${e.ll ?? "?"}</span>
       </div>
       <div class="lc-bars">
         <div class="lc-barrow"><span class="k">HP</span>${bar(lv.hp, st.hpMax)}<span class="v">${lv.hp ?? "?"}/${st.hpMax ?? "?"}${lv.overshield ? ` (+${lv.overshield})` : ""}</span></div>
@@ -212,8 +220,7 @@ function renderGM() {
           <span>SIZE <b>${st.size ?? "?"}</b></span>
         </div>
       </div>`;
-    card.addEventListener("click", () => card.classList.toggle("open"));
-    wrap.appendChild(card);
+    wrap.appendChild(card); // full stat readout is always visible — no click needed
   }
 }
 
@@ -949,7 +956,8 @@ function hideTooltip() { tipEl.style.display = "none"; }
 
 // ============================================================== DICE SYSTEM ====
 let diceTray = null;
-let diceInit = false;
+let diceInitPromise = null; // shared so concurrent callers await the SAME init
+let diceMod = null;         // the dice3d module (for SCHEMES colour lookups)
 let diceBusy = false;
 
 // What's queued in the tray, parallel to the tray's internal dice order.
@@ -978,11 +986,21 @@ function updateAdvCount() {
   el.textContent = n === 1 ? "1 die queued" : `${n} dice queued`;
 }
 
-async function ensureDiceTray() {
-  if (diceInit) { if (diceTray) diceTray.resize(); return diceTray; }
-  diceInit = true;
+// Single shared init promise — fixes the "first target-lock lands on an empty
+// tray" race, where the tab-switch and the weapon-prep both started init and
+// the second caller bailed out with a null tray mid-load.
+function ensureDiceTray() {
+  if (!diceInitPromise) diceInitPromise = initDiceTray();
+  return diceInitPromise.then((t) => {
+    if (t) t.resize();
+    return t;
+  });
+}
+
+async function initDiceTray() {
   try {
     const mod = await import("./dice3d.js");
+    diceMod = mod;
     const sel = $("scheme");
     if (sel && !sel.options.length) {
       for (const key of Object.keys(mod.SCHEMES)) {
@@ -993,14 +1011,15 @@ async function ensureDiceTray() {
       }
       const savedScheme = readStore().scheme;
       if (savedScheme && mod.SCHEMES[savedScheme]) sel.value = savedScheme;
-      sel.addEventListener("change", saveState);
+      sel.addEventListener("change", () => { recolorDicePicker(); saveState(); });
     }
     diceTray = mod.createDiceTray($("dicetray"), {
       scheme: () => $("scheme")?.value || "union",
-      height: 270,
+      height: 348,
     });
     window.__computeResult = mod.computeResult;
     diceTray.resize();
+    recolorDicePicker();
     updateAdvCount();
   } catch (e) {
     console.warn("[LANCER//UPLINK] 3D dice unavailable.", e);
@@ -1009,6 +1028,37 @@ async function ensureDiceTray() {
   }
   return diceTray;
 }
+
+// ---- dice picker: visual die shapes, coloured to the selected faction ---------
+const DIE_SHAPES = {
+  d4: { points: "20,4 36,34 4,34", num: 4, ty: 28 },
+  d6: { points: "7,7 33,7 33,33 7,33", num: 6, ty: 25 },
+  d8: { points: "20,3 36,20 20,37 4,20", num: 8, ty: 25 },
+  d10: { points: "20,3 35,15 29,36 11,36 5,15", num: 10, ty: 27 },
+  d12: { points: "20,3 36,15 30,35 10,35 4,15", num: 12, ty: 26 },
+  d20: { points: "20,2 35,11 35,29 20,38 5,29 5,11", num: 20, ty: 25 },
+};
+
+function dieIconSvg(type, color) {
+  const s = DIE_SHAPES[type];
+  if (!s) return type;
+  return `<svg viewBox="0 0 40 40" aria-label="${type}">
+    <polygon points="${s.points}" fill="${color}" stroke="rgba(255,255,255,0.55)" stroke-width="1.5" stroke-linejoin="round"/>
+    <text x="20" y="${s.ty}" text-anchor="middle" font-size="13" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#ffffff" style="text-shadow:0 0 3px #000">${s.num}</text>
+  </svg>`;
+}
+
+function recolorDicePicker() {
+  const key = $("scheme")?.value || "union";
+  const body = diceMod?.SCHEMES?.[key]?.body || "#9e2b30";
+  document.querySelectorAll('#dicepicker .die-btn[data-die]').forEach((btn) => {
+    btn.innerHTML = dieIconSvg(btn.dataset.die, body);
+  });
+  const acc = $("addadv"), dis = $("adddis");
+  if (acc) acc.innerHTML = dieIconSvg("d6", "#1d4ed8").replace(">6<", ">A<");
+  if (dis) dis.innerHTML = dieIconSvg("d6", "#5b21b6").replace(">6<", ">D<");
+}
+recolorDicePicker(); // initial paint with the default scheme colour
 
 function addQueued(type, role = "normal", as = null, pair = null) {
   if (!diceTray || diceBusy) return;
@@ -1358,6 +1408,7 @@ async function doRoll() {
             label, kind, detail,
             total: res.total,
             crit: critTxt,
+            scheme: $("scheme")?.value || "union",
             dice: raw.map((r) => ({ type: r.type, role: r.role, value: r.value })),
           },
           { destination: "REMOTE" }
@@ -1397,7 +1448,7 @@ async function onRemoteRoll(d) {
   banner.textContent = `▸ ${d.who} ROLLS…`;
   banner.style.display = "block";
   trayQueue = []; // the replay owns the tray now
-  await diceTray.replay(d.dice || []);
+  await diceTray.replay(d.dice || [], 1, d.scheme || null); // roller's colours
   diceTray.zoomToDice();
   showResult({
     total: d.total,
@@ -1538,6 +1589,38 @@ $("nudge-y")?.addEventListener("input", () => applyNudge(hex.grid.nudge.x, Numbe
 
 $("macro-toggle")?.addEventListener("change", saveState);
 
+// ---- UI text size (zoom-based: scales text AND layout together cleanly) -------
+let uiScale = 1;
+function applyUiScale() {
+  uiScale = Math.max(0.8, Math.min(1.5, uiScale));
+  document.body.style.zoom = uiScale;
+  const v = $("font-val");
+  if (v) v.textContent = `${Math.round(uiScale * 100)}%`;
+  diceTray?.resize(); // the tray canvas needs to know about the new layout size
+}
+$("font-minus")?.addEventListener("click", () => { uiScale -= 0.05; applyUiScale(); saveState(); });
+$("font-plus")?.addEventListener("click", () => { uiScale += 0.05; applyUiScale(); saveState(); });
+$("font-reset")?.addEventListener("click", () => { uiScale = 1; applyUiScale(); saveState(); });
+
+// ---- click-drag offset: arm the lattice-drag tool mode -------------------------
+$("btn-dragoffset")?.addEventListener("click", async () => {
+  if (!Object.keys(activeFields).length) {
+    setStatus("Put up a MOVE / SENSORS / RANGE field first, then drag it into place.", "status-err");
+    return; // nothing to align — the button deliberately does nothing
+  }
+  try {
+    await tool.activateMode("offset");
+    setStatus("Drag anywhere on the map to slide your fields into alignment.", "status-ok");
+  } catch (_) {
+    setStatus("Open a scene first.", "status-err");
+  }
+});
+tool.setOffsetCallback((final) => {
+  refreshNudgeVal();
+  refreshActiveFields();
+  if (final) saveState();
+});
+
 function refreshGridReadout() {
   const el = $("grid-readout");
   if (!el) return;
@@ -1631,6 +1714,7 @@ async function start() {
   refreshNudgeVal();
   syncCellSlider();
   refreshGridReadout();
+  if (st.uiScale) { uiScale = st.uiScale; applyUiScale(); }
   if ($("macro-toggle")) $("macro-toggle").checked = !!st.macro;
   if (st.bond && st.bond.id) bond = st.bond;
   updateBondUI();

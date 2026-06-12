@@ -30,7 +30,8 @@
       header h1 { font-size: 15px; letter-spacing: 3px; margin: 0; font-weight: 700; user-select: none; }
       header h1 .slash { color: var(--crimson); }
       header h1.gm .slash { color: var(--tech); }
-      #conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-left: auto; box-shadow: 0 0 6px currentColor; flex: none; }
+      .ver { margin-left: auto; font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: 1px; }
+      #conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 6px currentColor; flex: none; }
       #conn-dot.on { background: var(--good); color: var(--good); }
       nav.tabs { display: flex; background: var(--panel); border-bottom: 1px solid var(--line); }
       nav.tabs button { flex: 1; background: none; border: none; color: var(--muted); padding: 9px 4px; font-family: var(--font); font-size: 12px; font-weight: 600; letter-spacing: 2px; cursor: pointer; border-bottom: 2px solid transparent; }
@@ -137,14 +138,21 @@
       #tooltip .tt-body { padding: 8px 10px; font-size: 11.5px; line-height: 1.45; color: #dfe4f5; max-height: 220px; overflow: hidden; }
 
       /* ---------- dice ---------- */
-      .dice-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
-      .scheme-sel { width: auto; max-width: 55%; font-size: 11px; padding: 4px 6px; }
+      .dice-area { display: flex; gap: 6px; align-items: stretch; }
+      .dice-col { display: flex; flex-direction: column; gap: 4px; width: 52px; flex: none; }
+      .dice-col .die-btn { padding: 1px 0; min-height: 36px; }
+      .dice-col .die-btn svg { display: block; margin: 0 auto; width: 34px; height: 32px; }
+      .dice-col .accbtn { border-color: #2d5fd0; color: #ffd76a; font-weight: 700; }
+      .dice-col .disbtn { border-color: #5b21b6; color: #e6dcff; font-weight: 700; }
+      #traywrap { flex: 1; min-width: 0; }
+      .scheme-sel { width: auto; max-width: 40%; font-size: 11px; padding: 4px 6px; margin-left: auto; }
+      summary #advcount { float: right; font-weight: 400; font-size: 10px; font-family: var(--mono); opacity: 0.85; }
       #roll-context { font-family: var(--mono); font-size: 10.5px; color: var(--gold); background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--gold); padding: 5px 8px; margin-bottom: 6px; min-height: 14px; }
       #roll-context.tech { color: var(--tech); border-left-color: var(--tech); }
       #roll-context:empty { display: none; }
 
       #traywrap { position: relative; }
-      .dicetray { width: 100%; height: 270px; background: radial-gradient(ellipse at 50% 30%, #1b2230 0%, #0e1014 100%); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+      .dicetray { width: 100%; height: 348px; background: radial-gradient(ellipse at 50% 30%, #1b2230 0%, #0e1014 100%); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
       /* HORUS cascade corruption while rolling — kept gentle (no strobing) */
       .dicetray.glitching canvas { animation: hglitch 0.6s ease-in-out infinite; }
       @keyframes hglitch {
@@ -224,9 +232,10 @@
 
       /* ---------- MISSION//CONTROL (GM) ---------- */
       .gm-note { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-bottom: 10px; line-height: 1.5; }
-      .lancer-card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--tech); margin-bottom: 8px; cursor: pointer; }
-      .lancer-card .lc-head { display: flex; align-items: baseline; gap: 8px; padding: 8px 10px 4px; }
-      .lancer-card .lc-callsign { font-weight: 700; font-size: 14px; letter-spacing: 1px; text-transform: uppercase; }
+      .lancer-card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--tech); margin-bottom: 8px; }
+      .lancer-card .lc-head { display: flex; align-items: baseline; gap: 8px; padding: 8px 10px 4px; flex-wrap: wrap; }
+      .lancer-card .lc-callsign { font-weight: 700; font-size: 14px; letter-spacing: 1px; text-transform: uppercase; overflow-wrap: anywhere; max-width: 100%; }
+      .lancer-card .lc-mech { overflow-wrap: anywhere; }
       .lancer-card .lc-mech { color: var(--gold); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
       .lancer-card .lc-player { margin-left: auto; color: var(--muted); font-size: 10px; font-family: var(--mono); }
       .lc-bars { padding: 0 10px 8px; }
@@ -238,8 +247,7 @@
       .lc-barrow .v { width: 58px; font-family: var(--mono); font-size: 10px; }
       .lc-pips { display: flex; gap: 12px; padding: 0 10px 8px; font-family: var(--mono); font-size: 10px; color: var(--muted); }
       .lc-pips b { color: var(--text); }
-      .lc-detail { display: none; border-top: 1px solid var(--line); padding: 8px 10px; }
-      .lancer-card.open .lc-detail { display: block; }
+      .lc-detail { display: block; border-top: 1px solid var(--line); padding: 8px 10px; }
       .lc-stale { opacity: 0.45; }
       .gm-empty { color: var(--muted); font-family: var(--mono); font-size: 11px; padding: 20px; text-align: center; border: 1px dashed var(--line); }
     </style>
@@ -249,6 +257,7 @@
       <header>
         <img id="hdr-icon" src="./icons/tool.svg" alt="mode" title="Toggle MISSION//CONTROL (GM view)" onerror="this.style.display='none'" />
         <h1 id="hdr-title">LANCER<span class="slash">//</span>UPLINK</h1>
+        <span class="ver">v2.6.0</span>
         <span id="conn-dot" title="Owlbear link status"></span>
       </header>
       <nav class="tabs" id="tabnav">
@@ -328,12 +337,19 @@
 
       <!-- ============================ DICE ============================ -->
       <section id="tab-dice" class="tabpane">
-        <div class="dice-head">
-          <h2 style="margin:0">3D DICE TRAY</h2>
-          <select id="scheme" class="scheme-sel" title="Dice faction"></select>
-        </div>
-
         <div id="roll-context"></div>
+
+        <div class="dice-area">
+        <div class="dice-col" id="dicepicker">
+          <button class="die-btn" data-die="d4" title="Add a d4">d4</button>
+          <button class="die-btn" data-die="d6" title="Add a d6">d6</button>
+          <button class="die-btn" data-die="d8" title="Add a d8">d8</button>
+          <button class="die-btn" data-die="d10" title="Add a d10">d10</button>
+          <button class="die-btn" data-die="d12" title="Add a d12">d12</button>
+          <button class="die-btn" data-die="d20" title="Add a d20">d20</button>
+          <button id="addadv" class="die-btn accbtn" title="Add an Accuracy d6 (blue/gold crystal)">ACC</button>
+          <button id="adddis" class="die-btn disbtn" title="Add a Difficulty d6 (purple/white crystal)">DIF</button>
+        </div>
 
         <div id="traywrap">
           <div id="dicetray" class="dicetray"></div>
@@ -354,22 +370,8 @@
             <button id="cleardice" class="btn ghost">CLEAR</button>
           </div>
         </div>
+        </div><!-- /dice-area -->
         <div id="trayfallback" class="muted hidden" style="margin:6px 0">3D dice need an internet connection to load. Results will still be computed.</div>
-
-        <div class="dice-picker" id="dicepicker">
-          <button class="die-btn" data-die="d4">d4</button>
-          <button class="die-btn" data-die="d6">d6</button>
-          <button class="die-btn" data-die="d8">d8</button>
-          <button class="die-btn" data-die="d10">d10</button>
-          <button class="die-btn" data-die="d12">d12</button>
-          <button class="die-btn" data-die="d20">d20</button>
-        </div>
-
-        <div class="adv-row">
-          <button id="addadv" class="btn small green" title="Add an Accuracy d6 (white / gold)">+ ACCURACY</button>
-          <button id="adddis" class="btn small" style="background:#7a1f27" title="Add a Difficulty d6 (black / purple)">+ DIFFICULTY</button>
-          <span id="advcount" class="advcount muted">0 dice queued</span>
-        </div>
 
         <div class="mod-row">
           <div class="stepper" title="Flat bonus added to the total (grit, tech attack, etc.)">
@@ -382,10 +384,11 @@
           <label class="chk" id="crit-wrap" title="Crit damage: every damage die is rolled twice, keep the highest of each pair"><input id="crit-toggle" type="checkbox" /> CRIT</label>
           <label class="chk" title="Keep only the highest normal die"><input id="keephigh" type="checkbox" /> KEEP HIGH</label>
           <label class="chk" title="Roll stays on your screen only"><input id="hideroll" type="checkbox" /> HIDDEN</label>
+          <select id="scheme" class="scheme-sel" title="Dice faction"></select>
         </div>
 
         <details id="sec-log" open style="margin-top:10px">
-          <summary>COMBAT LOG</summary>
+          <summary>COMBAT LOG <span id="advcount">0 dice queued</span></summary>
           <div class="body">
             <div id="rolllog"></div>
             <button id="clearlog" class="btn ghost small" style="width:100%">CLEAR LOG</button>
@@ -463,6 +466,7 @@
               <label style="margin:4px 0 2px">Y</label>
               <input id="nudge-y" type="range" min="-300" max="300" step="2" value="0" style="width:100%" />
             </div>
+            <button id="btn-dragoffset" class="btn ghost small" style="margin-top:8px;width:100%" title="With a range field up: drag anywhere on the map to slide it into place">✥ CLICK-DRAG OFFSET</button>
             <button id="btn-fit" class="btn blue small" style="margin-top:8px;width:100%" title="Re-probe the scene's grid and match tile size & orientation to it">⌖ FIT TO SCENE</button>
           </div>
         </details>
@@ -472,13 +476,19 @@
           <div class="body">
             <label class="chk"><input id="macro-toggle" type="checkbox" /> AUTO STRUCTURE / OVERHEAT TABLE ROLLS</label>
             <p class="muted" style="margin:6px 0 0; line-height:1.5">When HP hits 0 (−1 Structure, HP refills) or Heat exceeds cap (−1 Stress, heat clears), automatically roll the structure / overheating table and post the result to the combat log.</p>
+            <label style="margin-top:12px">UI text size <span id="font-val" style="color:var(--text);font-family:var(--mono)">100%</span></label>
+            <div class="row">
+              <button id="font-minus" class="btn ghost small" title="Smaller text">A−</button>
+              <button id="font-plus" class="btn ghost small" title="Bigger text">A+</button>
+              <button id="font-reset" class="btn ghost small" title="Back to 100%">DEFAULT</button>
+            </div>
           </div>
         </details>
       </section>
 
       <!-- ================== MISSION//CONTROL: LANCERS (GM) ================== -->
       <section id="tab-lancers" class="tabpane">
-        <div class="gm-note">LIVE SQUAD TELEMETRY — every player with their Uplink panel open reports in automatically. Click a lancer for full readout. Click the icon up top to return to pilot mode.</div>
+        <div class="gm-note">LIVE SQUAD TELEMETRY</div>
         <div id="squad"></div>
       </section>
     </main>

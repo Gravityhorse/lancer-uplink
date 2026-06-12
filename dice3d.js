@@ -22,18 +22,20 @@ import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 import * as CANNON from "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/+esm";
 
 // ---- faction colour schemes -------------------------------------------------
-// Numbers are white across the board for readability.
+// Numbers are white across the board for readability. Each faction gets its
+// own engraving pattern (engStyle) carved into every face in gold.
 export const SCHEMES = {
-  union: { label: "Union",           body: "#9e2b30", num: "#ffffff", emissive: "#2a0000", trace: "#ff8a8a" },
-  ssc:   { label: "SSC",             body: "#b8923d", num: "#ffffff", emissive: "#3a2c00", trace: "#ffe9b0" },
-  horus: { label: "HORUS",           body: "#1f6e3a", num: "#ffffff", emissive: "#062b13", trace: "#7dffb0", glitch: true },
-  ha:    { label: "Harrison Armory", body: "#5c2f9e", num: "#ffffff", emissive: "#1a0633", trace: "#d6b7ff" },
-  ips:   { label: "IPS-Northstar",   body: "#34506e", num: "#ffffff", emissive: "#04101e", trace: "#9fd2ff" },
+  union: { label: "Union",           body: "#c01124", num: "#ffffff", emissive: "#3a0008", trace: "#ff8a8a", engStyle: "star" },
+  ssc:   { label: "SSC",             body: "#e2a51b", num: "#ffffff", emissive: "#4a3300", trace: "#ffe9b0", engStyle: "lotus" },
+  horus: { label: "HORUS",           body: "#13923f", num: "#ffffff", emissive: "#03350f", trace: "#7dffb0", glitch: true, engStyle: "tech" },
+  ha:    { label: "Harrison Armory", body: "#6d28d9", num: "#ffffff", emissive: "#220747", trace: "#d6b7ff", engStyle: "rigid" },
+  ips:   { label: "IPS-Northstar",   body: "#1e5fd6", num: "#ffffff", emissive: "#06183f", trace: "#9fd2ff", engStyle: "naval" },
 };
 
-// Accuracy: white die, gold numbers. Difficulty: black-purple die, white numbers.
-const ACC = { body: "#f4f1e8", num: "#c9920e", emissive: "#3d3526", trace: "#e6c878" };
-const DIS = { body: "#221330", num: "#ffffff", emissive: "#0d0418", trace: "#9a6bd0" };
+// Crystal accent dice — Accuracy: deep blue with gold numbers; Difficulty:
+// royal purple with white numbers. Engraved in silver, gem-facet pattern.
+const ACC = { body: "#1d4ed8", num: "#ffd76a", emissive: "#102a6e", trace: "#f0c75e", engStyle: "gem" };
+const DIS = { body: "#5b21b6", num: "#ffffff", emissive: "#220a45", trace: "#cdb6f0", engStyle: "gem" };
 
 // Die geometry + which face is read after settling.
 const DIE = {
@@ -117,12 +119,12 @@ function techTexture(baseColor, traceColor) {
   ctx.fillStyle = baseColor;
   ctx.fillRect(0, 0, s, s);
   ctx.globalCompositeOperation = "saturation";
-  ctx.fillStyle = "hsl(0, 84%, 50%)"; // push saturation hard — these should POP
+  ctx.fillStyle = "hsl(0, 94%, 50%)"; // deep, vivid colour — these should POP
   ctx.fillRect(0, 0, s, s);
   ctx.globalCompositeOperation = "source-over";
   const rg = ctx.createRadialGradient(s / 2, s / 2, s * 0.1, s / 2, s / 2, s * 0.75);
-  rg.addColorStop(0, "rgba(255,255,255,0.18)");
-  rg.addColorStop(1, "rgba(0,0,0,0.14)");
+  rg.addColorStop(0, "rgba(255,255,255,0.16)");
+  rg.addColorStop(1, "rgba(0,0,0,0.22)");
   ctx.fillStyle = rg;
   ctx.fillRect(0, 0, s, s);
 
@@ -171,25 +173,71 @@ function techTexture(baseColor, traceColor) {
   return tex;
 }
 
-// ---- number-label texture cache ----------------------------------------------
-// Every face gets a faint "engraved" frame — twin arcs + corner ticks — so the
-// dice read as machined hardware even up close.
-function drawEngraving(ctx, s, fg) {
+// ---- engraving patterns --------------------------------------------------------
+// Every face is "carved" in gold (silver on the crystal accent dice), with a
+// pattern per manufacturer: lotus petals (SSC), circuit work (HORUS), rigid
+// framing (HA), star ticks (Union), rope-and-arc (IPS-N), gem facets (acc/dis).
+function drawEngraving(ctx, s, fg, style = "tech") {
   ctx.save();
   ctx.strokeStyle = fg;
-  ctx.globalAlpha = 0.28;
-  ctx.lineWidth = 2;
-  // twin arcs top & bottom
-  ctx.beginPath(); ctx.arc(s / 2, s / 2, s * 0.42, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
-  ctx.beginPath(); ctx.arc(s / 2, s / 2, s * 0.42, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
-  // corner ticks
-  const t = s * 0.08;
-  for (const [cx, cy, dx, dy] of [[t, t, 1, 1], [s - t, t, -1, 1], [t, s - t, 1, -1], [s - t, s - t, -1, -1]]) {
-    ctx.beginPath();
-    ctx.moveTo(cx + dx * t, cy);
-    ctx.lineTo(cx, cy);
-    ctx.lineTo(cx, cy + dy * t);
-    ctx.stroke();
+  ctx.fillStyle = fg;
+  ctx.globalAlpha = 0.5;
+  ctx.lineWidth = 2.5;
+  const c = s / 2;
+  if (style === "lotus") {
+    // petal arcs blooming from the bottom and mirrored on top
+    for (const flip of [1, -1]) {
+      for (const k of [-1, 0, 1]) {
+        ctx.beginPath();
+        ctx.arc(c + k * s * 0.13, c + flip * s * 0.46, s * 0.16, Math.PI * (flip > 0 ? 1.1 : 0.1), Math.PI * (flip > 0 ? 1.9 : 0.9));
+        ctx.stroke();
+      }
+    }
+  } else if (style === "rigid") {
+    // hard double frame with notched corners
+    ctx.strokeRect(s * 0.08, s * 0.08, s * 0.84, s * 0.84);
+    ctx.globalAlpha = 0.3;
+    ctx.strokeRect(s * 0.15, s * 0.15, s * 0.7, s * 0.7);
+    ctx.globalAlpha = 0.5;
+    for (const [x, y] of [[s * 0.08, s * 0.08], [s * 0.92, s * 0.08], [s * 0.08, s * 0.92], [s * 0.92, s * 0.92]]) {
+      ctx.fillRect(x - 4, y - 4, 8, 8);
+    }
+  } else if (style === "star") {
+    // Union: small diamond stars at the four compass points
+    for (const [x, y] of [[c, s * 0.09], [c, s * 0.91], [s * 0.09, c], [s * 0.91, c]]) {
+      ctx.beginPath();
+      ctx.moveTo(x, y - 7); ctx.lineTo(x + 5, y); ctx.lineTo(x, y + 7); ctx.lineTo(x - 5, y);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(c, c, s * 0.43, 0, Math.PI * 2); ctx.setLineDash([10, 8]); ctx.stroke(); ctx.setLineDash([]);
+  } else if (style === "naval") {
+    // IPS-N: rope arcs port & starboard with cleat bars
+    for (const k of [-1, 1]) {
+      ctx.beginPath();
+      ctx.arc(c + k * s * 0.52, c, s * 0.22, Math.PI * 0.6 * -k + Math.PI / 2, Math.PI * 0.6 * -k + Math.PI * 1.5);
+      ctx.stroke();
+      ctx.fillRect(c + k * s * 0.4 - 3, c - 14, 6, 28);
+    }
+  } else if (style === "gem") {
+    // crystal facets: corner-to-centre cut lines
+    ctx.globalAlpha = 0.4;
+    for (const [x, y] of [[s * 0.1, s * 0.1], [s * 0.9, s * 0.1], [s * 0.1, s * 0.9], [s * 0.9, s * 0.9]]) {
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(c + (x - c) * 0.45, c + (y - c) * 0.45); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(c, c, s * 0.4, 0, Math.PI * 2); ctx.stroke();
+  } else {
+    // "tech": circuit corners + node pads (HORUS / default)
+    const t = s * 0.09;
+    for (const [cx, cy, dx, dy] of [[t, t, 1, 1], [s - t, t, -1, 1], [t, s - t, 1, -1], [s - t, s - t, -1, -1]]) {
+      ctx.beginPath();
+      ctx.moveTo(cx + dx * t * 2, cy);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(cx, cy + dy * t * 2);
+      ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx + dx * t * 2, cy, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(c, c, s * 0.42, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
+    ctx.beginPath(); ctx.arc(c, c, s * 0.42, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke();
   }
   ctx.restore();
 }
@@ -197,15 +245,15 @@ function drawEngraving(ctx, s, fg) {
 const numTexCache = new Map();
 // `underline` disambiguates 6 / 9 — only meaningful on dice that actually
 // HAVE a 9 (d10/d12/d20). A d6's 6 stays a clean 6.
-function numberTexture(value, fg, underline = false) {
-  const key = `${value}|${fg}|${underline ? "u" : ""}`;
+function numberTexture(value, fg, underline = false, engColor = "#d9b44a", engStyle = "tech") {
+  const key = `${value}|${fg}|${underline ? "u" : ""}|${engColor}|${engStyle}`;
   if (numTexCache.has(key)) return numTexCache.get(key);
   const s = 128;
   const cv = document.createElement("canvas");
   cv.width = cv.height = s;
   const ctx = cv.getContext("2d");
   ctx.clearRect(0, 0, s, s);
-  drawEngraving(ctx, s, fg);
+  drawEngraving(ctx, s, engColor, engStyle);
   // soft dark halo behind the glyph so white numbers pop on light faces too
   ctx.shadowColor = "rgba(0,0,0,0.85)";
   ctx.shadowBlur = 10;
@@ -225,7 +273,8 @@ function numberTexture(value, fg, underline = false) {
 
 // ---- the tray controller -------------------------------------------------------
 export function createDiceTray(container, opts = {}) {
-  const getSchemeKey = () => opts.scheme?.() || "union";
+  let schemeKeyOverride = null; // replay() paints dice in the ROLLER's colours
+  const getSchemeKey = () => schemeKeyOverride || opts.scheme?.() || "union";
   const getScheme = () => SCHEMES[getSchemeKey()] || SCHEMES.union;
 
   const W = container.clientWidth || 360;
@@ -443,24 +492,39 @@ export function createDiceTray(container, opts = {}) {
     if (type === "d10") { for (let i = 0; i < values.length; i++) values[i] = (i + 1) % 10; }
 
     const c = dieColors(role);
-    // Physical material: rough machined faces under a glossy clearcoat so the
-    // dice catch the light and pop against the dark tray.
-    const mat = new THREE.MeshPhysicalMaterial({
-      map: techTexture(c.body, c.trace || "#ffffff"),
-      color: "#ffffff",
-      roughness: 0.55, metalness: 0.45,
-      clearcoat: 0.7, clearcoatRoughness: 0.22,
-      emissive: new THREE.Color(c.emissive || "#000000"),
-      emissiveIntensity: role === "normal" ? 0.4 : 0.2,
-      flatShading: true,
-    });
+    const isCrystal = role !== "normal";
+    // Normal dice: deep lacquered colour under a heavy clearcoat.
+    // Accuracy / Difficulty: crystal — glassy, faintly translucent, iridescent.
+    const mat = isCrystal
+      ? new THREE.MeshPhysicalMaterial({
+          map: techTexture(c.body, c.trace || "#ffffff"),
+          color: "#ffffff",
+          transparent: true, opacity: 0.96,
+          roughness: 0.15, metalness: 0.15,
+          clearcoat: 1.0, clearcoatRoughness: 0.08,
+          iridescence: 0.45, iridescenceIOR: 1.4,
+          emissive: new THREE.Color(c.emissive || "#000000"),
+          emissiveIntensity: 0.35,
+          flatShading: true,
+        })
+      : new THREE.MeshPhysicalMaterial({
+          map: techTexture(c.body, c.trace || "#ffffff"),
+          color: "#ffffff",
+          roughness: 0.45, metalness: 0.5,
+          clearcoat: 0.9, clearcoatRoughness: 0.14,
+          emissive: new THREE.Color(c.emissive || "#000000"),
+          emissiveIntensity: 0.45,
+          flatShading: true,
+        });
     const mesh = new THREE.Mesh(geometry, mat);
     mesh.castShadow = true;
 
     const needsUnderline = def.faces >= 9; // has both a 6 and a 9 face
+    const engColor = isCrystal ? "#d7dde6" : "#d9b44a"; // silver / gold
+    const engStyle = c.engStyle || "tech";
     faces.forEach((f, i) => {
       const disp = type === "d10" ? (values[i] === 0 ? 10 : values[i]) : values[i];
-      const tex = numberTexture(disp, c.num, needsUnderline);
+      const tex = numberTexture(disp, c.num, needsUnderline, engColor, engStyle);
       const size = type === "d6" ? 0.8 : type === "d20" ? 0.62 : 0.7;
       const plane = new THREE.Mesh(
         new THREE.PlaneGeometry(size, size),
@@ -651,15 +715,18 @@ export function createDiceTray(container, opts = {}) {
     return throwDice(fresh, 1);
   }
 
-  // Replay someone else's roll: spawn their dice, roll for show, force values.
-  async function replay(specs, power = 1) {
+  // Replay someone else's roll: spawn their dice — in THEIR faction colours —
+  // roll for show, force the real values.
+  async function replay(specs, power = 1, schemeKey = null) {
     if (rolling) return null;
     clearTray();
+    schemeKeyOverride = schemeKey && SCHEMES[schemeKey] ? schemeKey : null;
     specs.forEach((s) => {
       const d = buildDie(DIE[s.type] ? s.type : "d6", s.role || "normal");
       d.forceTo = s.value;
       dice.push(d);
     });
+    schemeKeyOverride = null;
     stage();
     stageView(); // same cinematic close-up the roller saw
     await new Promise((r) => setTimeout(r, 350));

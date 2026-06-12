@@ -3,6 +3,22 @@
 Things that would make this tool genuinely great, roughly ordered by
 bang-for-buck.
 
+## Shipped in 2.6.0 ✓
+
+- ✓ Cone slimmed one tile per side (boundary rails trimmed)
+- ✓ First-click target-lock race fixed (shared dice-tray init promise)
+- ✓ Replays render in the ROLLER's faction colours
+- ✓ Deeper, glossier dice; crystal blue/gold Accuracy & purple/white Difficulty
+- ✓ Gold faction engravings: lotus (SSC), circuit (HORUS), rigid (HA),
+  star (Union), naval (IPS-N); silver gem facets on the crystal dice
+- ✓ Dice picker is a left-hand column of colour-matched die icons; taller
+  tray; scheme select in the modifier row; queue count lives on the Combat Log
+- ✓ Weapon rolls scroll the dice tab to the top and collapse the Combat Log
+- ✓ GM: trimmed telemetry note, stats always visible, long names soft-hyphen wrap
+- ✓ UI text size control (A− / A+ / Default, persisted)
+- ✓ CLICK-DRAG OFFSET tool mode — drag your range fields into alignment
+- ✓ Version number in the header and README
+
 ## Shipped in 2.5.0 ✓
 
 - ✓ Overshield removed from the COMP/CON view (still in the stat grid)
