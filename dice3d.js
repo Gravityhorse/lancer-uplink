@@ -195,8 +195,10 @@ function drawEngraving(ctx, s, fg) {
 }
 
 const numTexCache = new Map();
-function numberTexture(value, fg) {
-  const key = `${value}|${fg}`;
+// `underline` disambiguates 6 / 9 — only meaningful on dice that actually
+// HAVE a 9 (d10/d12/d20). A d6's 6 stays a clean 6.
+function numberTexture(value, fg, underline = false) {
+  const key = `${value}|${fg}|${underline ? "u" : ""}`;
   if (numTexCache.has(key)) return numTexCache.get(key);
   const s = 128;
   const cv = document.createElement("canvas");
@@ -212,8 +214,8 @@ function numberTexture(value, fg) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(String(value), s / 2, s / 2 + 4);
-  if (value === 6 || value === 9) {
-    ctx.fillRect(s / 2 - 22, s / 2 + 30, 44, 7); // disambiguate 6 / 9
+  if (underline && (value === 6 || value === 9)) {
+    ctx.fillRect(s / 2 - 22, s / 2 + 30, 44, 7);
   }
   const tex = new THREE.CanvasTexture(cv);
   tex.anisotropy = 4;
@@ -455,9 +457,10 @@ export function createDiceTray(container, opts = {}) {
     const mesh = new THREE.Mesh(geometry, mat);
     mesh.castShadow = true;
 
+    const needsUnderline = def.faces >= 9; // has both a 6 and a 9 face
     faces.forEach((f, i) => {
       const disp = type === "d10" ? (values[i] === 0 ? 10 : values[i]) : values[i];
-      const tex = numberTexture(disp, c.num);
+      const tex = numberTexture(disp, c.num, needsUnderline);
       const size = type === "d6" ? 0.8 : type === "d20" ? 0.62 : 0.7;
       const plane = new THREE.Mesh(
         new THREE.PlaneGeometry(size, size),

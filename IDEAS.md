@@ -3,6 +3,15 @@
 Things that would make this tool genuinely great, roughly ordered by
 bang-for-buck.
 
+## Shipped in 2.5.0 ✓
+
+- ✓ Overshield removed from the COMP/CON view (still in the stat grid)
+- ✓ Free tray rolls show just the number; result card border is tray-blue
+- ✓ d6s show a clean 6 (underline only on dice that also have a 9)
+- ✓ Grid offset updates LIVE on active fields, with stepper/slider toggle
+- ✓ Templates render above range fields (PROP layer); the eraser can no
+  longer delete range fields by accident
+
 ## Shipped in 2.4.0 ✓
 
 - ✓ Cone restored to the solid filled triangle (the "symmetric rows" version

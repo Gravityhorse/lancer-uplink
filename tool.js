@@ -311,14 +311,18 @@ async function eraseAt(p) {
   const near = (i) =>
     (i.commands || []).some((c) => c[0] === 0 && Math.hypot(c[1] - p.x, c[2] - p.y) < radius);
 
+  // NOTE: range fields (move/sensors/weapon) are deliberately NOT erasable
+  // here — clear those with their toggle buttons or CLEAR MY RANGE FIELDS.
+  // This stops the eraser from eating your movement field by accident.
+
   // 1) stray previews — always purge on any erase click
   await deleteAllPreviews();
 
-  // 2) my local (private) templates and range fields
+  // 2) my local (private) templates
   try {
     const locals = await OBR.scene.local.getItems((i) => {
       const k = i.metadata?.[META]?.kind;
-      return (k === "template-local" || k === "range" || k === "overlay") && near(i);
+      return k === "template-local" && near(i);
     });
     if (locals.length) {
       await OBR.scene.local.deleteItems(locals.map((i) => i.id));

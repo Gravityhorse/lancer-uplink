@@ -114,9 +114,12 @@ export async function clearBoostField(slotBase) {
 
 let localTmplSeq = 0;
 
+// Templates live on the PROP layer — ABOVE range fields (DRAWING layer) — so
+// dropping a blast never visually buries your movement/sensor field, and the
+// eraser can hit templates without touching ranges.
 export async function addLocalTemplate(hexes, opts) {
   const slot = `tmpl-${++localTmplSeq}`;
-  await showLocalOverlay(slot, hexes, { ...opts, kind: "template-local" });
+  await showLocalOverlay(slot, hexes, { ...opts, kind: "template-local", layer: "PROP" });
   return slot;
 }
 
@@ -155,7 +158,7 @@ export async function clearLocalTemplates() {
 // ---- shared templates -------------------------------------------------------
 
 export async function addSharedTemplate(hexes, opts) {
-  const item = buildHexOverlay(hexes, { ...opts, kind: "template" });
+  const item = buildHexOverlay(hexes, { ...opts, kind: "template", layer: "PROP" });
   await OBR.scene.items.addItems([item]);
   return item.id;
 }

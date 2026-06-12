@@ -574,7 +574,6 @@ function renderCC(s) {
     `<div class="ccpips">
       <span>STRUCT <b>${"◆".repeat(live.structure)}${"◇".repeat(Math.max(0, s.structureMax - live.structure))}</b> ${pp("structure")}</span>
       <span>STRESS <b>${"◆".repeat(live.stress)}${"◇".repeat(Math.max(0, s.stressMax - live.stress))}</b> ${pp("stress")}</span>
-      <span>O.SHLD <b>${live.overshield}</b> ${pp("overshield")}</span>
     </div>
     <div class="ccpips">
       <span>EVA <b>${s.evasion}</b></span><span>E-DEF <b>${s.edef}</b></span>
@@ -1326,7 +1325,11 @@ async function doRoll() {
 
     // ---- present: zoom in, pop the result, surface FIRE / heat-apply buttons
     diceTray.zoomToDice();
-    const sub = ctx.kind === "dmg" ? "DAMAGE" : ctx.kind === "tech" ? "TECH" : (res.d20 != null ? "ACCURACY" : "TOTAL");
+    // free rolls from the tray show just the number — no sub-label
+    const sub = ctx.kind === "dmg" ? "DAMAGE"
+      : ctx.kind === "tech" ? "TECH"
+      : ctx.kind === "atk" ? "ACCURACY"
+      : "";
     showResult({ total: res.total, sub, kind, crit: critTxt });
 
     if (ctx.followUp) {
@@ -1455,6 +1458,7 @@ $("clearranges")?.addEventListener("click", async () => {
 $("grid-mode")?.addEventListener("change", () => {
   hex.setGridOverride($("grid-mode").value);
   refreshGridReadout();
+  refreshActiveFields(); // live update
   saveState();
 });
 
@@ -1471,6 +1475,7 @@ cellSlider?.addEventListener("input", () => {
   const v = $("cell-size-val");
   if (v) v.textContent = `${cellSlider.value} px (manual)`;
   refreshGridReadout();
+  refreshActiveFields(); // live update
   saveState();
 });
 
@@ -1478,30 +1483,58 @@ $("btn-fit")?.addEventListener("click", async () => {
   hex.setCellSize(null); // drop the manual override, trust the probe
   await recalibrate();
   syncCellSlider();
+  refreshActiveFields(); // live update
   saveState();
   setStatus("Grid re-probed and matched to the scene.", "status-ok");
 });
 
-// manual lattice offset — each click shifts by ⅛ of a tile
+// Re-place every active range field in place — makes grid tweaks (offset,
+// tile size) update LIVE instead of needing a sensors off/on cycle.
+let refreshFieldsTimer = 0;
+function refreshActiveFields() {
+  clearTimeout(refreshFieldsTimer);
+  refreshFieldsTimer = setTimeout(async () => {
+    if (!Object.keys(activeFields).length) return;
+    const item = await getBondItem();
+    if (!item) return;
+    const c = hex.pixelToHex(item.position);
+    for (const [kind, f] of Object.entries(activeFields)) {
+      await placeFieldAt(kind, c, f.size, f.boost);
+    }
+  }, 120);
+}
+
+// manual lattice offset — steppers shift by ⅛ tile; slider mode for sweeps
 function refreshNudgeVal() {
   const v = $("nudge-val");
   if (v) v.textContent = `${Math.round(hex.grid.nudge.x)}, ${Math.round(hex.grid.nudge.y)} px`;
+  const sx = $("nudge-x"), sy = $("nudge-y");
+  if (sx) sx.value = String(Math.max(-300, Math.min(300, Math.round(hex.grid.nudge.x))));
+  if (sy) sy.value = String(Math.max(-300, Math.min(300, Math.round(hex.grid.nudge.y))));
+}
+function applyNudge(x, y) {
+  hex.setNudge(x, y);
+  refreshNudgeVal();
+  refreshActiveFields(); // live update — no sensors off/on dance
+  saveState();
 }
 function nudgeBy(dx, dy) {
   const step = Math.max(4, Math.round(hex.grid.dpi / 8));
-  hex.setNudge(hex.grid.nudge.x + dx * step, hex.grid.nudge.y + dy * step);
-  refreshNudgeVal();
-  saveState();
+  applyNudge(hex.grid.nudge.x + dx * step, hex.grid.nudge.y + dy * step);
 }
 $("nx-minus")?.addEventListener("click", () => nudgeBy(-1, 0));
 $("nx-plus")?.addEventListener("click", () => nudgeBy(1, 0));
 $("ny-minus")?.addEventListener("click", () => nudgeBy(0, -1));
 $("ny-plus")?.addEventListener("click", () => nudgeBy(0, 1));
-$("n-reset")?.addEventListener("click", () => {
-  hex.setNudge(0, 0);
-  refreshNudgeVal();
-  saveState();
+$("n-reset")?.addEventListener("click", () => applyNudge(0, 0));
+
+$("nudge-mode")?.addEventListener("change", () => {
+  const slider = $("nudge-mode").checked;
+  $("nudge-steppers")?.classList.toggle("hidden", slider);
+  $("nudge-sliders")?.classList.toggle("hidden", !slider);
 });
+$("nudge-x")?.addEventListener("input", () => applyNudge(Number($("nudge-x").value), hex.grid.nudge.y));
+$("nudge-y")?.addEventListener("input", () => applyNudge(hex.grid.nudge.x, Number($("nudge-y").value)));
 
 $("macro-toggle")?.addEventListener("change", saveState);
 

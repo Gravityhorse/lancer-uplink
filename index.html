@@ -167,7 +167,7 @@
 
       #resultbox { position: absolute; top: 10px; left: 10px; display: none; align-items: center; gap: 8px; z-index: 5; }
       #resultbox.show { display: flex; }
-      #resultcard { background: rgba(10, 12, 16, 0.92); border: 2px solid var(--gold); border-radius: 10px; padding: 6px 14px; text-align: center; min-width: 64px; box-shadow: 0 4px 14px rgba(0,0,0,0.6); }
+      #resultcard { background: rgba(10, 12, 16, 0.92); border: 2px solid #7ee6ff; border-radius: 10px; padding: 6px 14px; text-align: center; min-width: 64px; box-shadow: 0 4px 14px rgba(0,0,0,0.6); }
       #resultcard .num { font-size: 28px; font-weight: 700; font-family: var(--mono); line-height: 1.05; }
       #resultcard .sub { font-size: 9px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; }
       #resultcard .crit { color: var(--gold); font-size: 10px; font-weight: 700; }
@@ -449,12 +449,19 @@
             <label style="margin-top:10px">Tile size <span id="cell-size-val" style="color:var(--text);font-family:var(--mono)">150 px</span></label>
             <input id="cell-size" type="range" min="30" max="600" step="2" value="150" style="width:100%" />
             <label style="margin-top:10px">Grid offset <span id="nudge-val" style="color:var(--text);font-family:var(--mono)">0, 0</span></label>
-            <div class="row">
+            <label class="chk" style="margin:4px 0 6px"><input id="nudge-mode" type="checkbox" /> SLIDER MODE</label>
+            <div id="nudge-steppers" class="row">
               <button id="nx-minus" class="btn ghost small" title="Shift the lattice left">◀ X</button>
               <button id="nx-plus" class="btn ghost small" title="Shift the lattice right">X ▶</button>
               <button id="ny-minus" class="btn ghost small" title="Shift the lattice up">▲ Y</button>
               <button id="ny-plus" class="btn ghost small" title="Shift the lattice down">Y ▼</button>
               <button id="n-reset" class="btn ghost small" title="Clear the manual offset">⟲</button>
+            </div>
+            <div id="nudge-sliders" class="hidden">
+              <label style="margin:4px 0 2px">X</label>
+              <input id="nudge-x" type="range" min="-300" max="300" step="2" value="0" style="width:100%" />
+              <label style="margin:4px 0 2px">Y</label>
+              <input id="nudge-y" type="range" min="-300" max="300" step="2" value="0" style="width:100%" />
             </div>
             <button id="btn-fit" class="btn blue small" style="margin-top:8px;width:100%" title="Re-probe the scene's grid and match tile size & orientation to it">⌖ FIT TO SCENE</button>
           </div>
