@@ -3,6 +3,80 @@
 Things that would make this tool genuinely great, roughly ordered by
 bang-for-buck.
 
+## Shipped in 2.8.3 ✓
+
+- ✓ **Overkill fixed to RAW**: a damage die showing 1 is REROLLED (replaced),
+  +1 Heat per reroll, chaining indefinitely — it no longer keeps the 1
+- ✓ **Combat Drill exception**: still rerolls the original 1 but ALSO spawns a
+  bonus die each trigger (one 1 → two dice, up to four on snake-eyes), detected
+  automatically from the weapon
+- ✓ Crit label trimmed to "⚡ CRIT"; FIRE button drops "(CRIT)" (gold glow tell)
+- ✓ Target Lock respects the CRIT and OVERKILL toggles — a crit confirmed any
+  way rolls crit damage even if accuracy totalled < 20
+- ✓ ATK + Target Lock are ONE button (solid red `ATK ⬢` / blue `TECH ATK ⬢`),
+  sized to match the ◈ range/sensors button beside it
+- ✓ **HASE fix**: Systems now adds E-Defense (was missing); Agility→Evasion,
+  Systems→Tech Attack etc. all verified against the rules
+- ✓ **Core Bonus modifiers** apply (Full Subjectivity Sync +2 Evasion, Fomorian
+  +1 Size…) via a generic `bonuses[]` scan — same hook generalises system
+  bonuses, so Personalizations +2 HP is no longer special-cased
+- ✓ **TECHS tab** (was TECH ATTACK): Tech Attack + Invade + Quick Tech + Full
+  Tech sub-groups, ported straight from installed systems & talents. Invade and
+  the other chips are reference-only (hover/click pins the header — no rolling)
+- ✓ **CORE tab** (HORUS green): the frame's core power + every core bonus with
+  mechanical effects; SYSTEMS tab is now Harrison-Armory purple (no twin reds)
+- ✓ Systems show flavour text; the same item under TECHS shows the mechanics
+- ✓ Cone marks its origin tile and Blast marks its centre, like Line
+- ✓ NHP nat-1 lines reworked + five new ones; a glitch effect on "Trust me.";
+  multi-line quips centre cleanly (arrow lines on their own rows)
+- ✓ Mission Control: every NPC stat (incl. E-DEF / SPD / ARMOR) is now an inline
+  −/+ stepper right on the card
+- ✓ Remote rolls play in a **dedicated right-side popup tray** — never touch
+  your dice, queue with readable timing, result stays dim until the dice land
+- ✓ Dice are deeper & glossier: PMREM environment reflections, thicker
+  clearcoat, jewel-deepened colours (stone & crystal)
+- ✓ IPS-Northstar is the default scheme (top of the list, Union at the bottom)
+- ✓ Themed dark scrollbars; pinned tooltips are hand-scrollable
+- ✓ FORGET SAVED PILOT actually clears the loaded sheet
+- ✓ "Iconoclast" (and any id-derived talent) title-cased
+- ✓ Grid: flat-top default, orientation trusts Owlbear's grid type, FIT TO
+  SCENE re-anchors on the bonded token; grid-type labels simplified
+- ✓ A+/A− re-pin the clicked button so repeat clicks land on the same spot
+- ✓ Trimmed the four instructional blurbs (Range Fields / Token Bond /
+  Templates / Invade)
+
+## Notes & next suggestions (post-2.8.3, Claude)
+
+Things I noticed while building 2.8.3 that you didn't list but are worth doing:
+
+- **Combat Drill is unconditional right now.** RAW, the bonus die only triggers
+  vs a Prone / Immobilized / Stunned target. Uplink can't see the target's
+  condition, so per your spec it always explodes. A small "drill bonus active"
+  toggle on the FIRE bar would make it rules-exact when you want it.
+- **Lock On / Accurate / Reliable aren't wired into the dice.** A "consume Lock
+  On (+1 Acc)" checkbox on the attack bar, auto-adding an Accuracy die for
+  *Accurate* weapons / a Difficulty die for *Inaccurate*, and a damage floor for
+  *Reliable*, would remove a lot of manual fiddling.
+- **Some tech options can't auto-sort.** Quick/Full Tech grouping reads each
+  action's `activation`. Systems whose ability is a deployable with no action
+  (e.g. **Lotus Projector**) have nothing to sort on, so they only appear under
+  SYSTEMS. Could fall back to a system-level "deploy" classification.
+- **Content-pack talents** (e.g. Iconoclast) only surface their tech actions if
+  COMP/CON embedded the talent data in the export. If it only references the id
+  and the talent isn't in public `lancer-data`, the actions can't be shown —
+  worth confirming against your actual file; if it's a problem, a small
+  user-supplied LCP cache would fix it.
+- **Reactions/Protocols** are folded into Quick Tech (each chip still shows its
+  true activation). A dedicated "Reactions" group could be cleaner.
+- **Loading / Ordnance tracking** (grey out ATK after firing until Reload).
+- **Conditions tracker** (Impaired, Jammed, Lock On, Exposed) that also stamps
+  the bonded token — pairs naturally with the new TECHS panel.
+- **Overcharge button** that rolls the escalating heat cost (1 / 1d3 / 1d6 /
+  1d6+4) and applies it.
+- **Write HP/Heat to token metadata** so health-bar extensions can read it.
+- **Multi-profile weapons**: a profile selector (swappable ammo) — currently the
+  first profile is used.
+
 ## Shipped in 2.8.1 ✓
 
 - ✓ EVA / SAVE / SENS quick-edit steppers right on each NPC card

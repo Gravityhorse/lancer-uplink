@@ -7,7 +7,7 @@ const DATA_SOURCES = [
   "https://unpkg.com/lancer-data/lib",
 ];
 
-const compendium = { frames: null, weapons: null, systems: null, talents: null, loaded: false };
+const compendium = { frames: null, weapons: null, systems: null, talents: null, coreBonuses: null, loaded: false };
 
 async function fetchJson(file) {
   for (const base of DATA_SOURCES) {
@@ -22,16 +22,18 @@ async function fetchJson(file) {
 export async function loadCompendium(onStatus) {
   if (compendium.loaded) return compendium;
   onStatus?.("Downloading compendium...");
-  const [frames, weapons, systems, talents] = await Promise.all([
+  const [frames, weapons, systems, talents, coreBonuses] = await Promise.all([
     fetchJson("frames.json"),
     fetchJson("weapons.json"),
     fetchJson("systems.json"),
     fetchJson("talents.json"),
+    fetchJson("core_bonuses.json"),
   ]);
   compendium.frames = frames || [];
   compendium.weapons = weapons || [];
   compendium.systems = systems || [];
   compendium.talents = talents || [];
+  compendium.coreBonuses = coreBonuses || [];
   compendium.loaded = !!(frames && weapons);
   onStatus?.(compendium.loaded ? "Compendium online." : "Compendium offline - manual mode available.");
   return compendium;
@@ -45,6 +47,8 @@ export const findSystem = (id) =>
   compendium.systems?.find((s) => s.id === id) || null;
 export const findTalent = (id) =>
   compendium.talents?.find((t) => t.id === id) || null;
+export const findCoreBonus = (id) =>
+  compendium.coreBonuses?.find((c) => c.id === id) || null;
 
 // ---- pilot file parsing -----------------------------------------------------
 
@@ -161,10 +165,19 @@ export function parsePilot(p) {
       sys: Number(skills[2] ?? 0),
       eng: Number(skills[3] ?? 0),
     },
-    // COMP/CON talents: [{ id, rank }] (older exports may use bare ids)
-    talents: (p.talents || []).map((t) =>
-      typeof t === "string" ? { id: t, rank: 1 } : { id: t.id || "", rank: Number(t.rank ?? 1) }
-    ).filter((t) => t.id),
+    // COMP/CON talents: [{ id, rank }] (older exports may use bare ids).
+    // Preserve any embedded talent data (ranks/actions) so content-pack talents
+    // COMP/CON didn't put in lancer-data (e.g. Iconoclast) still resolve.
+    talents: (p.talents || []).map((t) => {
+      if (typeof t === "string") return { id: t, rank: 1, data: null };
+      const embedded = (t.data && Array.isArray(t.data.ranks)) ? t.data
+        : (Array.isArray(t.ranks) ? t : null);
+      return { id: t.id || "", rank: Number(t.rank ?? 1), data: embedded };
+    }).filter((t) => t.id),
+    // Core bonuses are pilot-level (bare id strings) but modify the active mech.
+    coreBonuses: (p.core_bonuses || p.corebonuses || [])
+      .map((c) => (typeof c === "string" ? c : c?.id || ""))
+      .filter(Boolean),
   };
 
   const mechs = (p.mechs || []).map((m) => {
@@ -200,6 +213,29 @@ export function parsePilot(p) {
 
 // ---- derived stats (Lancer core rules) -------------------------------------
 
+// Map a lancer-data bonus id onto a derived-stat key. Conditional/weapon-scoped
+// bonuses (range with damage/weapon/range_types, SP, AI cap, etc.) are skipped —
+// they aren't flat defensive stats.
+const BONUS_STAT = {
+  hp: "hpMax", armor: "armor", edef: "edef", evasion: "evasion",
+  heatcap: "heatMax", save: "save", size: "size", speed: "speed",
+  sensor: "sensors", sensor_range: "sensors", tech_attack: "techAttack",
+  attack: "attackBonus", repcap: "repMax",
+};
+
+function applyStatBonuses(stats, bonuses) {
+  for (const b of bonuses || []) {
+    if (!b) continue;
+    // weapon-scoped range/damage bonuses don't touch flat stats
+    if (b.weapon_types || b.damage_types || b.range_types) continue;
+    const key = BONUS_STAT[b.id];
+    if (!key) continue;
+    const v = Number(b.val);
+    if (!Number.isFinite(v)) continue;
+    stats[key] = (stats[key] || 0) + v;
+  }
+}
+
 export function resolveMech(mechRaw, pilot) {
   // Prefer the frame embedded in the export; fall back to the CDN compendium.
   const frame = mechRaw.frameData || findFrame(mechRaw.frameId);
@@ -207,29 +243,30 @@ export function resolveMech(mechRaw, pilot) {
   const { hull, agi, sys, eng } = pilot.hase;
   const grit = pilot.grit;
 
-  // Resolve systems first — some grant stat bonuses (e.g. Personalizations: +2 HP).
+  // Resolve systems first — some grant stat bonuses (Personalizations: +2 HP,
+  // and any other system carrying a lancer-data `bonuses` array).
   const systems = mechRaw.systems
     .map((s) => resolveSystem(s))
     .filter(Boolean)
     .slice(0, 24);
-  const hasPersonalizations = systems.some(
-    (x) => (x.id || "").includes("personalizations") || /personalizations/i.test(x.name || "")
-  );
-  const hpBonus = hasPersonalizations ? 2 : 0;
+
+  // Resolve pilot core bonuses — they're pilot-level but modify this mech
+  // (Full Subjectivity Sync: +2 Evasion, Fomorian Frame: +1 Size, etc.).
+  const coreBonuses = resolveCoreBonuses(pilot.coreBonuses);
 
   const stats = {
     frameName: frame
       ? `${frame.source || ""} ${frame.name || ""}`.trim()
       : mechRaw.frameId || "UNKNOWN FRAME",
     size: fs.size ?? 1,
-    hpMax: (fs.hp ?? 8) + grit + hull * 2 + hpBonus,
+    hpMax: (fs.hp ?? 8) + grit + hull * 2,
     armor: fs.armor ?? 0,
     structureMax: fs.structure ?? 4,
     stressMax: fs.stress ?? 4,
     heatMax: (fs.heatcap ?? 6) + eng,
     repMax: (fs.repcap ?? 4) + Math.floor(hull / 2),
     evasion: (fs.evasion ?? 8) + agi,
-    edef: fs.edef ?? 8,
+    edef: (fs.edef ?? 8) + sys, // HASE: Systems adds E-Defense (was missing)
     speed: (fs.speed ?? 4) + Math.floor(agi / 2),
     sensors: fs.sensor_range ?? 10,
     techAttack: (fs.tech_attack ?? 0) + sys,
@@ -238,12 +275,34 @@ export function resolveMech(mechRaw, pilot) {
     coreMax: 1,
   };
 
+  // Layer on every stat-affecting bonus from installed systems and core bonuses.
+  for (const s of systems) applyStatBonuses(stats, s.bonuses);
+  for (const c of coreBonuses) applyStatBonuses(stats, c.bonuses);
+
   const mounts = mechRaw.mounts.map((mt, i) => ({
     label: mt.type ? `${mt.type.toUpperCase()} MOUNT` : `MOUNT ${i + 1}`,
     weapons: mt.weapons.map(resolveWeapon).filter(Boolean),
   }));
 
-  return { name: mechRaw.name, stats, mounts, systems, current: mechRaw.current, frame };
+  return { name: mechRaw.name, stats, mounts, systems, coreBonuses, current: mechRaw.current, frame };
+}
+
+// pilot core-bonus ids → [{ id, name, source, effect, description, bonuses }]
+export function resolveCoreBonuses(ids) {
+  return (ids || []).map((id) => {
+    const data = findCoreBonus(id);
+    const fallback = String(id || "").replace(/^cb_/, "").replace(/_/g, " ");
+    if (!data) return { id, name: fallback || "Core Bonus", source: "", effect: "", description: "", bonuses: [] };
+    return {
+      id,
+      name: data.name || fallback,
+      source: data.source || "",
+      // Tech-style "what it does" text comes from `effect`; description is flavour.
+      effect: effectText(data.effect),
+      description: effectText(data.description),
+      bonuses: Array.isArray(data.bonuses) ? data.bonuses : [],
+    };
+  });
 }
 
 // ---- systems ----------------------------------------------------------------
@@ -267,23 +326,30 @@ export function resolveSystem(ref) {
   const id = r.id || r.data?.id || "";
   const data = r.data || findSystem(id);
   const fallbackName = (id || "").replace(/^ms_/, "").replace(/_/g, " ") || "System";
-  if (!data) return { id, name: fallbackName, sp: null, activation: "", description: "" };
+  if (!data) return { id, name: fallbackName, sp: null, activation: "", description: "", effect: "", flavor: "", bonuses: [], actionsFull: [] };
 
   const acts = Array.isArray(data.actions) ? data.actions : [];
   const activation = acts
     .map((a) => String(a.activation || "").trim())
     .filter(Boolean)
     .join(" / ");
-  const description = [effectText(data.effect), effectText(data.description)]
-    .filter(Boolean)
-    .join(" — ");
+  // SYSTEMS tab shows flavour-forward text; the TECHS tab wants the mechanical
+  // effect. Keep them separate so each tab can pick the right one.
+  const effect = effectText(data.effect);
+  const flavor = effectText(data.description);
+  const description = [effect, flavor].filter(Boolean).join(" — ");
   return {
     id,
     name: data.name || fallbackName,
     sp: data.sp ?? null,
+    type: data.type || "",
     activation,
     description,
-    // full action list, so Invade options granted by systems can be surfaced
+    effect,
+    flavor,
+    bonuses: Array.isArray(data.bonuses) ? data.bonuses : [],
+    // full action list, so Invade options / Quick & Full Tech granted by
+    // systems can be surfaced in the TECHS tab
     actionsFull: acts.map((a) => ({
       name: a.name || data.name || fallbackName,
       activation: String(a.activation || "").trim(),
@@ -294,17 +360,38 @@ export function resolveSystem(ref) {
 
 // ---- talents ------------------------------------------------------------------
 // pilotTalents: [{ id, rank }] → [{ id, name, rank, description }]
+// Title-case a name that's entirely lowercase (an id-derived fallback such as
+// "iconoclast" from a content pack COMP/CON didn't embed). Properly-cased
+// compendium names ("Technophile", "HEXED") are left untouched.
+const fixCase = (s) => {
+  const str = String(s || "");
+  return str && str === str.toLowerCase()
+    ? str.replace(/\b([a-z])/g, (_, c) => c.toUpperCase())
+    : str;
+};
+
 export function resolveTalents(pilotTalents) {
   return (pilotTalents || []).map((t) => {
-    const data = findTalent(t.id);
+    const data = t.data || findTalent(t.id);
     const fallbackName = (t.id || "").replace(/^t_/, "").replace(/_/g, " ") || "Talent";
-    if (!data) return { id: t.id, name: fallbackName, rank: t.rank, description: "" };
-    const ranks = Array.isArray(data.ranks) ? data.ranks : [];
+    const name = fixCase(data?.name || fallbackName);
+    const ranks = Array.isArray(data?.ranks) ? data.ranks : [];
     const owned = ranks.slice(0, Math.max(1, t.rank));
+    // Tech actions this talent grants (Mimetic Spark, etc.) for the TECHS tab.
+    const actions = [];
+    owned.forEach((r) => {
+      for (const a of (r.actions || [])) {
+        actions.push({
+          name: a.name || r.name || name,
+          activation: String(a.activation || "").trim(),
+          detail: effectText(a.detail || a.description || a.effect || ""),
+        });
+      }
+    });
     const description = owned
       .map((r, i) => `${"I".repeat(i + 1)} — ${r.name || ""}: ${effectText(r.description || r.effect || "")}`)
       .join("  •  ");
-    return { id: t.id, name: data.name || fallbackName, rank: t.rank, description };
+    return { id: t.id, name, rank: t.rank, description: data ? description : "", actions };
   });
 }
 

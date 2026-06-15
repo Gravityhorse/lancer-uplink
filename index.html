@@ -22,6 +22,18 @@
       html, body { height: 100%; }
       body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--text); font-size: 13px; }
 
+      /* themed scrollbars — kill the immersion-breaking white Windows bars */
+      * { scrollbar-width: thin; scrollbar-color: #2f5d9e #0d1016; }
+      ::-webkit-scrollbar { width: 10px; height: 10px; }
+      ::-webkit-scrollbar-track { background: #0d1016; border-radius: 6px; }
+      ::-webkit-scrollbar-thumb {
+        background: linear-gradient(180deg, #26405f, #131f33);
+        border: 1px solid #2f6bbd; border-radius: 6px;
+        box-shadow: inset 0 0 4px rgba(126,230,255,0.15);
+      }
+      ::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #357ad1, #1b2c49); }
+      ::-webkit-scrollbar-corner { background: #0d1016; }
+
       /* ---------- sticky top bar (header + tabs stay put while you scroll) ---------- */
       #topbar { position: sticky; top: 0; z-index: 60; background: var(--bg); box-shadow: 0 3px 10px rgba(0,0,0,0.45); }
       header { padding: 8px 12px 6px; border-bottom: 2px solid var(--crimson); display: flex; align-items: center; gap: 8px; background: linear-gradient(180deg, #1a1e25 0%, #15181d 100%); }
@@ -63,6 +75,8 @@
       details > .body { background: var(--panel); border: 1px solid var(--line); border-top: none; padding: 10px; }
       details.navyhead > summary { background: #2f3f6e; }
       details.goldhead > summary { background: #7a5a1d; }
+      details.purplehead > summary { background: #4a2a8f; } /* SYSTEMS — Harrison Armory purple, no longer a 2nd red tab */
+      details.greenhead > summary { background: #176e34; } /* CORE — HORUS green */
 
       /* ---------- pilot ---------- */
       .filebtn { display: block; text-align: center; cursor: pointer; border: 1px dashed var(--line); border-radius: 6px; padding: 14px; color: var(--muted); background: var(--panel); }
@@ -111,7 +125,10 @@
       .ccpips span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
       .ccpips b { color: var(--text); }
 
-      .weapon { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--crimson); padding: 8px; margin-bottom: 6px; }
+      .weapon { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--crimson); padding: 8px; margin-bottom: 6px; transition: border-color 0.15s, box-shadow 0.15s; }
+      .weapon:hover { box-shadow: 0 0 0 1px rgba(126,230,255,0.06), 0 2px 8px rgba(0,0,0,0.3); }
+      .system { transition: border-color 0.12s, color 0.12s, background 0.12s; }
+      .btn { transition: filter 0.12s, transform 0.05s; }
       .weapon.techw { border-left-color: var(--tech); }
       .weapon .top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
       .weapon .wname { font-weight: 600; letter-spacing: 0.5px; cursor: help; display: inline-flex; align-items: center; gap: 5px; }
@@ -123,6 +140,21 @@
       .weapon .tags { color: var(--gold); font-size: 10px; letter-spacing: 1px; margin-top: 2px; }
       .weapon .btn.lock { background: #5c1218; border: 1px solid var(--crimson); font-size: 13px; padding: 4px 7px; }
       .weapon .btn.lock.blue { background: #11304f; border-color: var(--tech); }
+      /* combined ATK + Target-Lock button, and the ◈ template/range button beside
+         it, kept the SAME height with matching logo sizes */
+      .wbtns { display: inline-flex; align-items: stretch; gap: 5px; }
+      .btn.atk-lock, .btn.tech-lock {
+        display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+        height: 30px; padding: 0 12px; font-size: 12px; font-weight: 700; letter-spacing: 1px;
+        background: var(--crimson); border: 1px solid #d8454f;
+      }
+      .btn.tech-lock { background: #2f6bbd; border-color: var(--tech); }
+      .btn.atk-lock:hover, .btn.tech-lock:hover { filter: brightness(1.15); }
+      .btn.atk-lock .hexlogo, .btn.tech-lock .hexlogo { font-size: 15px; line-height: 1; opacity: 0.95; }
+      .btn.icon-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        height: 30px; width: 32px; padding: 0; font-size: 15px; line-height: 1;
+      }
       .mount-label { font-size: 10px; color: var(--muted); letter-spacing: 1.5px; margin: 10px 0 4px; }
 
       .sys-wrap { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -131,6 +163,56 @@
       .system.invade { border-left: 3px solid var(--tech); cursor: pointer; }
       .system.invade:hover { border-color: var(--tech); }
       .system.talent { border-left: 3px solid var(--gold); }
+      .system.corebonus { border-left: 3px solid #2faa5b; cursor: pointer; }
+      .system.corebonus:hover { border-color: #5ad17a; }
+
+      /* TECHS sub-groups (Invade / Quick Tech / Full Tech) */
+      .tech-group { margin-top: 10px; }
+      .tech-group.hidden { display: none; }
+      .tech-grouplbl { font-size: 10px; color: var(--muted); letter-spacing: 2px; font-weight: 700; margin: 0 0 5px; padding-left: 6px; border-left: 3px solid var(--tech); }
+      #grp-quick .tech-grouplbl { border-left-color: var(--lavender); }
+      #grp-full .tech-grouplbl { border-left-color: var(--gold); }
+      /* CORE tab */
+      .weapon.corew { border-left-color: #2faa5b; }
+      .weapon.corew .acticon { color: #5ad17a; }
+      .core-effect { white-space: normal; line-height: 1.45; }
+
+      /* ---- remote-roll side popup (other players' dice) ---- */
+      #remote-popup {
+        position: fixed; top: 80px; right: 0; width: 192px; z-index: 45;
+        pointer-events: none; /* never blocks your own tray */
+        background: linear-gradient(180deg, rgba(13,18,28,0.97), rgba(8,11,17,0.97));
+        border: 1px solid var(--tech); border-right: none;
+        border-radius: 8px 0 0 8px;
+        box-shadow: -6px 6px 22px rgba(0,0,0,0.55), inset 0 0 18px rgba(63,167,214,0.08);
+        transform: translateX(108%); transition: transform 0.42s cubic-bezier(0.4,0,0.2,1);
+        overflow: hidden;
+      }
+      #remote-popup.show { transform: translateX(0); }
+      .rp-head {
+        display: flex; align-items: center; gap: 6px; padding: 6px 9px;
+        font-family: var(--mono); font-size: 11px; letter-spacing: 1px; color: #bfeaff;
+        background: rgba(47,107,189,0.18); border-bottom: 1px solid rgba(126,230,255,0.35);
+        text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .rp-head .rp-spark { color: var(--tech); animation: rpblink 1s steps(2) infinite; }
+      @keyframes rpblink { 50% { opacity: 0.25; } }
+      #rp-who { font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+      .rp-q { margin-left: auto; color: var(--muted); font-size: 9px; letter-spacing: 0; }
+      .remote-dicetray { width: 192px; height: 170px; background: radial-gradient(ellipse at 50% 35%, #1b2230 0%, #0c0e13 100%); }
+      .rp-result {
+        display: flex; align-items: baseline; gap: 7px; padding: 7px 10px 8px;
+        border-top: 1px solid rgba(126,230,255,0.25); min-height: 30px;
+      }
+      .rp-label { font-size: 9px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; }
+      .rp-total {
+        margin-left: auto; font-family: var(--mono); font-weight: 700; font-size: 24px; line-height: 1;
+        color: #4b5566; transition: color 0.25s, text-shadow 0.25s; /* dim until the roll lands */
+      }
+      .rp-result.revealed .rp-total { color: #eaf6ff; text-shadow: 0 0 12px rgba(126,230,255,0.7); }
+      .rp-result.revealed.dmg .rp-total { text-shadow: 0 0 12px rgba(255,61,0,0.7); }
+      .rp-result.revealed.tech .rp-total { text-shadow: 0 0 12px rgba(61,165,255,0.7); }
+      .rp-crit { font-size: 10px; font-weight: 700; color: var(--gold); }
 
       /* tooltip */
       #tooltip { position: fixed; z-index: 99; max-width: 310px; background: var(--navy); border: 1px solid var(--lavender); border-radius: 6px; box-shadow: 0 6px 18px rgba(0,0,0,0.6); pointer-events: none; display: none; }
@@ -140,7 +222,9 @@
       #tt-close { display: none; position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; background: #3b2766; color: #cdb6f0; border: 1px solid #5b21b6; border-radius: 3px; font-size: 10px; line-height: 1; padding: 0; cursor: pointer; }
       #tooltip.pinned #tt-close { display: block; }
       #tt-close:hover { background: #4a2a7a; color: #fff; }
-      #tooltip .tt-body { padding: 8px 10px; font-size: 11.5px; line-height: 1.45; color: #dfe4f5; max-height: 46vh; overflow: hidden; transition: opacity 0.85s; }
+      #tooltip .tt-body { padding: 8px 10px; font-size: 11.5px; line-height: 1.45; color: #dfe4f5; max-height: 46vh; overflow: hidden; transition: opacity 0.85s; overscroll-behavior: contain; }
+      /* hover auto-scrolls long text; a PINNED tooltip becomes hand-scrollable */
+      #tooltip.pinned .tt-body { overflow-y: auto; max-height: 60vh; }
 
       /* ---------- dice ---------- */
       .dice-area { display: flex; gap: 6px; align-items: stretch; }
@@ -168,8 +252,16 @@
       }
 
       /* NHP nat-1 commentary — brief glitchy whisper over the tray */
-      #nhp-quip { position: absolute; top: 46%; left: 50%; transform: translate(-50%, -50%); z-index: 6; display: none; max-width: 86%; text-align: center; font-family: var(--mono); font-size: 12.5px; letter-spacing: 1px; color: #d6ffe6; background: rgba(8, 14, 10, 0.82); border: 1px solid #2faa5b; border-radius: 4px; padding: 7px 12px; pointer-events: none; text-shadow: 0 0 6px rgba(125, 255, 176, 0.8); }
-      #nhp-quip.show { display: block; animation: quipglitch 0.45s steps(3) infinite, quipfade 3.8s linear forwards; }
+      #nhp-quip { position: absolute; top: 46%; left: 50%; transform: translate(-50%, -50%); z-index: 6; display: none; max-width: 90%; text-align: center; font-family: var(--mono); font-size: 12.5px; letter-spacing: 1px; line-height: 1.55; color: #d6ffe6; background: rgba(8, 14, 10, 0.82); border: 1px solid #2faa5b; border-radius: 4px; padding: 9px 14px; pointer-events: none; text-shadow: 0 0 6px rgba(125, 255, 176, 0.8); }
+      #nhp-quip.show { display: block; animation: quipglitch 0.45s steps(3) infinite, quipfade 4.1s linear forwards; }
+      /* a single phrase corrupts — chromatic-aberration flicker on "Trust me." */
+      #nhp-quip .glitch-text { color: #eafff2; animation: gtext 0.42s steps(2) infinite; }
+      @keyframes gtext {
+        0%   { text-shadow: -1.5px 0 #ff3b6b, 1.5px 0 #3df0ff; }
+        45%  { text-shadow: 1.5px 0 #ff3b6b, -1.5px 0 #3df0ff; }
+        70%  { text-shadow: -1px 0.5px #ff3b6b, 1px -0.5px #3df0ff; }
+        100% { text-shadow: 0 0 5px #7dffb0; }
+      }
       @keyframes quipglitch {
         0% { transform: translate(-50%, -50%); clip-path: inset(0 0 0 0); }
         33% { transform: translate(calc(-50% + 1px), calc(-50% - 1px)); clip-path: inset(0 0 6% 0); }
@@ -188,6 +280,8 @@
       #resultcard.tech { border-color: var(--tech); }
       #firebtn { display: none; background: #ff1a1a; color: #fff; border: 2px solid #ff6b6b; border-radius: 8px; font-family: var(--font); font-weight: 700; font-size: 15px; letter-spacing: 3px; padding: 10px 16px; cursor: pointer; text-shadow: 0 0 6px #fff; box-shadow: 0 0 14px rgba(255, 26, 26, 0.7); animation: firepulse 0.9s ease-in-out infinite alternate; }
       #firebtn.show { display: inline-block; }
+      /* crit FIRE drops the "(CRIT)" text but keeps a gold tell */
+      #firebtn.crit { border-color: var(--gold); color: #fff; box-shadow: 0 0 18px rgba(255,180,84,0.9); }
       @keyframes firepulse { from { box-shadow: 0 0 8px rgba(255,26,26,0.5); } to { box-shadow: 0 0 22px rgba(255,26,26,0.95); } }
       #heatapply { display: none; background: #7a2d00; color: #ffb454; border: 1px solid var(--heatred); border-radius: 8px; font-family: var(--mono); font-weight: 700; font-size: 11px; padding: 8px 10px; cursor: pointer; }
       #heatapply.show { display: inline-block; }
@@ -271,6 +365,12 @@
       .lc-pips { display: flex; gap: 12px; padding: 0 10px 8px; font-family: var(--mono); font-size: 10px; color: var(--muted); flex-wrap: wrap; }
       .lc-pips span { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
       .lc-pips b { color: var(--text); }
+      /* inline stat steppers on NPC cards — every stat editable, evenly gridded */
+      .lc-edit { display: grid !important; grid-template-columns: repeat(3, 1fr); gap: 6px 8px; }
+      .lc-edit .ss { display: inline-flex; align-items: center; gap: 3px; }
+      .lc-edit .ss .ssl { color: var(--muted); font-size: 9px; letter-spacing: 0.5px; min-width: 34px; }
+      .lc-edit .ss b { min-width: 16px; text-align: center; color: var(--text); }
+      .lc-edit .pp:hover { border-color: var(--tech); color: #fff; }
       .lc-sub { width: 100%; display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
       .lc-sub .lc-player { margin-left: 0; }
       .lancer-card { cursor: pointer; }
@@ -285,7 +385,7 @@
       <header>
         <img id="hdr-icon" src="./icons/tool.svg" alt="mode" title="Toggle MISSION//CONTROL (GM view)" onerror="this.style.display='none'" />
         <h1 id="hdr-title">LANCER<span class="slash">//</span>UPLINK</h1>
-        <span class="ver">v2.8.1</span>
+        <span class="ver">v2.8.3</span>
         <span id="conn-dot" title="Owlbear link status"></span>
       </header>
       <nav class="tabs" id="tabnav">
@@ -342,15 +442,25 @@
           </details>
 
           <details id="sec-tech" class="navyhead" open>
-            <summary>TECH ATTACK</summary>
+            <summary>TECHS</summary>
             <div class="body">
               <div id="techcard"></div>
-              <div class="mount-label" style="margin-top:8px">INVADE OPTIONS — hover for details, click to roll</div>
-              <div class="sys-wrap" id="invades"></div>
+              <div class="tech-group" id="grp-invade">
+                <div class="tech-grouplbl">INVADE</div>
+                <div class="sys-wrap" id="invades"></div>
+              </div>
+              <div class="tech-group" id="grp-quick">
+                <div class="tech-grouplbl">QUICK TECH</div>
+                <div class="sys-wrap" id="quicktech"></div>
+              </div>
+              <div class="tech-group" id="grp-full">
+                <div class="tech-grouplbl">FULL TECH</div>
+                <div class="sys-wrap" id="fulltech"></div>
+              </div>
             </div>
           </details>
 
-          <details id="sec-systems" open>
+          <details id="sec-systems" class="purplehead" open>
             <summary>SYSTEMS</summary>
             <div class="body"><div class="sys-wrap" id="systems"></div></div>
           </details>
@@ -358,6 +468,11 @@
           <details id="sec-talents" class="goldhead" open>
             <summary>TALENTS</summary>
             <div class="body"><div class="sys-wrap" id="talents"></div></div>
+          </details>
+
+          <details id="sec-core" class="greenhead" open>
+            <summary>CORE</summary>
+            <div class="body"><div id="core"></div></div>
           </details>
         </div>
         <p id="status">Booting…</p>
@@ -434,14 +549,13 @@
               <button class="mob-btn green" id="map-move" disabled>MOVE<small>load a pilot</small></button>
               <button class="mob-btn blue" id="map-sensors" disabled>SENSORS<small>load a pilot</small></button>
             </div>
-            <p class="muted" style="margin:6px 0 0">MOVE cycles: move → move&nbsp;+&nbsp;boost → off. SENSORS toggles on/off.</p>
           </div>
         </details>
 
         <details open>
           <summary>TOKEN BOND</summary>
           <div class="body">
-            <p class="muted" style="margin:0 0 8px; line-height:1.5">Select your mech's token on the map, then bond it. MOVE / BOOST / SENSORS fields will centre on it automatically and follow it when it moves.</p>
+            <p class="muted" style="margin:0 0 8px; line-height:1.5">Select your mech's token on the map, then bond it.</p>
             <div class="row">
               <button id="btn-bond" class="btn blue small">BOND SELECTED TOKEN</button>
               <button id="btn-unbond" class="btn ghost small">CLEAR</button>
@@ -453,10 +567,7 @@
         <details open>
           <summary>TEMPLATES</summary>
           <div class="body">
-            <p class="muted" style="margin:0 0 8px; line-height:1.5">
-              Select the <b>LANCER</b> tool in Owlbear's left toolbar — Blast / Cone / Line / Erase appear in the top-centre mode bar.
-              <b>Click-drag</b>: the press point is the origin; drag out to size and aim. Everything snaps to the grid.
-            </p>
+            <p class="muted" style="margin:0 0 8px; line-height:1.5">Select the <b>LANCER</b> tool in Owlbear's left toolbar.</p>
             <div class="row" style="margin-bottom:6px">
               <button id="vis-toggle" class="all" title="Who sees weapon templates you place">👁 TEMPLATES: ALL PLAYERS</button>
             </div>
@@ -477,9 +588,9 @@
             <label style="margin-top:10px">Grid type</label>
             <select id="grid-mode">
               <option value="auto">AUTO (match the room)</option>
-              <option value="hexp">HEX — POINTY TOP (flats on the sides)</option>
-              <option value="hexf">HEX — FLAT TOP (flats on top &amp; bottom)</option>
-              <option value="square">SQUARE (king-move ranges)</option>
+              <option value="hexf">HEX — FLAT TOP</option>
+              <option value="hexp">HEX — POINT TOP</option>
+              <option value="square">SQUARE</option>
             </select>
             <label style="margin-top:10px">Tile size <span id="cell-size-val" style="color:var(--text);font-family:var(--mono)">150 px</span></label>
             <input id="cell-size" type="range" min="30" max="600" step="2" value="150" style="width:100%" />
@@ -565,6 +676,23 @@
         </div>
       </section>
     </main>
+
+    <!-- Teammates' (non-hidden) rolls replay HERE — a self-contained tray on the
+         right that never touches your own dice. Slides in, plays, reveals the
+         result, pans to the next in queue. -->
+    <div id="remote-popup">
+      <div class="rp-head">
+        <span class="rp-spark">▸</span>
+        <span id="rp-who">PLAYER</span>
+        <span id="rp-q" class="rp-q"></span>
+      </div>
+      <div id="remote-dicetray" class="remote-dicetray"></div>
+      <div id="rp-result" class="rp-result">
+        <span id="rp-label" class="rp-label">ACCURACY</span>
+        <span id="rp-total" class="rp-total">—</span>
+        <span id="rp-crit" class="rp-crit"></span>
+      </div>
+    </div>
 
     <div id="tooltip">
       <div class="tt-head" id="tt-head"></div>

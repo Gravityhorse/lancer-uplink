@@ -462,6 +462,9 @@ function renderNpcs() {
   for (const n of npcs) {
     const card = document.createElement("div");
     card.className = "npc-card";
+    // every defensive stat gets the same inline −/+ stepper, right on the card
+    const statStep = (label, key, val) =>
+      `<span class="ss"><span class="ssl">${label}</span><button class="pp" data-stat="${key}" data-d="-1">−</button><b>${val}</b><button class="pp" data-stat="${key}" data-d="1">+</button></span>`;
     // status colour: red name at 0 HP, orange when heat is maxed
     const nameColor = n.hp <= 0 ? "#ff4d4d" : (n.heatMax > 0 && n.heat >= n.heatMax) ? "#ffae42" : "#ffffff";
     card.innerHTML = `
@@ -477,15 +480,15 @@ function renderNpcs() {
         <button class="pp" data-act="hp" data-d="-1">−</button><button class="pp" data-act="hp" data-d="1">+</button></div>
       <div class="lc-barrow"><span class="k">HEAT</span>${segBar(n.heat, Math.max(1, n.heatMax), "var(--heatred)")}<span class="v">${n.heat}/${n.heatMax}</span>
         <button class="pp" data-act="heat" data-d="-1">−</button><button class="pp" data-act="heat" data-d="1">+</button></div>
-      <div class="lc-pips" style="padding:4px 0 0">
-        <span>EVA <button class="pp" data-stat="evasion" data-d="-1">−</button><b>${n.evasion}</b><button class="pp" data-stat="evasion" data-d="1">+</button></span>
-        <span>SAVE <button class="pp" data-stat="save" data-d="-1">−</button><b>${n.save}</b><button class="pp" data-stat="save" data-d="1">+</button></span>
-        <span>SENS <button class="pp" data-stat="sensors" data-d="-1">−</button><b>${n.sensors ?? 10}</b><button class="pp" data-stat="sensors" data-d="1">+</button></span>
+      <div class="lc-pips lc-edit" style="padding:6px 0 0">
+        ${statStep("EVA", "evasion", n.evasion)}
+        ${statStep("E-DEF", "edef", n.edef)}
+        ${statStep("ARMOR", "armor", n.armor)}
       </div>
-      <div class="lc-pips" style="padding:4px 0 0">
-        <span>E-DEF <b>${n.edef}</b></span>
-        <span>SPD <b>${n.speed}</b></span>
-        <span>ARMOR <b>${n.armor}</b></span>
+      <div class="lc-pips lc-edit" style="padding:4px 0 0">
+        ${statStep("SPD", "speed", n.speed)}
+        ${statStep("SAVE", "save", n.save)}
+        ${statStep("SENS", "sensors", n.sensors ?? 10)}
       </div>
       ${n.features ? `<div class="nc-notes">${n.features}</div>` : ""}`;
     card.querySelector('[data-act="edit"]').addEventListener("click", () => openNpcForm(n));
@@ -619,8 +622,23 @@ $("mechselect").addEventListener("change", (e) => renderMech(Number(e.target.val
 
 $("forgetpilot")?.addEventListener("click", () => {
   forgetState();
+  // Actually clear the loaded pilot — wipe state AND the sheet, not just the
+  // saved copy.
   curRawPilot = null;
-  setStatus("Saved pilot forgotten. It won't auto-load next time.", "status-ok");
+  currentPilot = null;
+  currentMech = null;
+  currentMechs = [];
+  rosterPilots = [];
+  live = null;
+  restoreLive = null;
+  restoreMechIdx = null;
+  $("sheet")?.classList.add("hidden");
+  $("forgetpilot")?.classList.add("hidden");
+  $("pilotpicker")?.classList.add("hidden");
+  $("mechpicker")?.classList.add("hidden");
+  $("sec-import")?.setAttribute("open", "");
+  if ($("pilotfile")) $("pilotfile").value = "";
+  setStatus("Saved pilot forgotten and cleared. Upload a COMP/CON export to begin.", "status-ok");
 });
 
 // ---- live reactor state -------------------------------------------------------
@@ -673,9 +691,10 @@ function renderMech(idx) {
   renderStatGrid(s);
   renderMounts(m);
   renderTechCard(s);
-  renderInvades(m);
+  renderTechs(m);
   renderSystems(m);
   renderTalentChips();
+  renderCore(m);
 
   $("sheet").classList.remove("hidden");
   saveState();
@@ -1089,22 +1108,22 @@ function weaponCard(w, mountLabel) {
   if (w.loading) tags.push("LOADING");
   const spec = weaponTemplateSpec(w);
   const tmplBtn = spec
-    ? `<button class="btn small ghost" data-act="tmpl" title="${spec.field ? `Toggle ${spec.name} field around your token` : `Arm ${spec.name} template`}">◈</button>`
+    ? `<button class="btn small ghost icon-btn" data-act="tmpl" title="${spec.field ? `Toggle ${spec.name} field around your token` : `Arm ${spec.name} template`}">◈</button>`
     : "";
   const act = weaponActionInfo(w, mountLabel);
+  // ATK and Target Lock are one button now: it always runs the lock flow
+  // (roll accuracy → FIRE chains damage). The hex marks it as a lock.
   el.innerHTML = `
     <div class="top">
       <span class="wname" data-act="info" title="${act.title} — hover for weapon details">${act.icon}${w.name}</span>
-      <span>
+      <span class="wbtns">
         ${tmplBtn}
-        <button class="btn small" data-act="atk" title="Attack roll: d20 + grit">ATK</button>
-        <button class="btn small lock" data-act="lock" title="Target lock: roll accuracy, then FIRE for damage">⬢</button>
+        <button class="btn small atk-lock" data-act="lock" title="ATK / Target Lock — roll accuracy, then FIRE chains damage">ATK<span class="hexlogo">⬢</span></button>
       </span>
     </div>
     <div class="meta">${[w.mountSize, w.type].filter(Boolean).join(" ")} — ${rangeBits(w)} — <b>${w.damage}</b></div>
     ${tags.length ? `<div class="tags">${tags.join(" · ")}</div>` : ""}
   `;
-  el.querySelector('[data-act="atk"]').addEventListener("click", () => prepareWeaponAttack(w, false));
   el.querySelector('[data-act="lock"]').addEventListener("click", () => prepareWeaponAttack(w, true));
   // hover the weapon name → full tooltip
   const nameEl = el.querySelector('[data-act="info"]');
@@ -1139,62 +1158,139 @@ function weaponCard(w, mountLabel) {
 function renderTechCard(s) {
   const el = $("techcard");
   const sign = s.techAttack >= 0 ? `+${s.techAttack}` : `${s.techAttack}`;
+  // TECH ATK and Target Lock are one button (mirrors the weapon ATK button).
   el.innerHTML = `
-    <div class="weapon techw" style="margin-bottom:0">
+    <div class="weapon techw" style="margin-bottom:8px">
       <div class="top">
         <span class="wname" title="Quick action (Quick Tech)">${ICON_QUICK}TECH ATTACK</span>
-        <span>
-          <button class="btn small ghost" data-act="trange" title="Toggle sensor range field (tech attacks reach anything in Sensors)">◈</button>
-          <button class="btn small blue" data-act="tatk" title="Tech attack: d20 ${sign}">TECH ATK</button>
-          <button class="btn small lock blue" data-act="tlock" title="Roll tech accuracy with the lock flow">⬢</button>
+        <span class="wbtns">
+          <button class="btn small ghost icon-btn" data-act="trange" title="Toggle sensor range field (tech attacks reach anything in Sensors)">◈</button>
+          <button class="btn small tech-lock" data-act="tlock" title="TECH ATK / Target Lock — d20 ${sign} vs E-DEF, then FIRE">TECH ATK<span class="hexlogo">⬢</span></button>
         </span>
       </div>
       <div class="meta">d20 ${sign} vs E-DEF — Sensors ${s.sensors}</div>
     </div>`;
   el.querySelector('[data-act="trange"]').addEventListener("click", toggleSensors);
-  el.querySelector('[data-act="tatk"]').addEventListener("click", () => prepareTechAttack());
   el.querySelector('[data-act="tlock"]').addEventListener("click", () => prepareTechAttack());
 }
 
-// Core quick-tech options every mech has, plus any Invade options granted by
-// installed systems. Hover for the rules text; click to roll the tech attack.
-const INVADE_BASE = [
-  { name: "Invade — Fragment Signal", activation: "Quick Tech", roll: true, detail: "Tech attack vs E-Defense. On hit: the target takes 2 Heat and is IMPAIRED and SLOWED until the end of its next turn." },
-  { name: "Scan", activation: "Quick Tech", roll: false, detail: "Choose a character within Sensors: view its full stat block, hidden information (e.g. one piece of GM knowledge), or its last known orders. No attack roll — click toggles your sensor range." },
-  { name: "Lock On", activation: "Quick Tech", roll: false, detail: "Choose a character within Sensors and line of sight: it gains LOCK ON. Any attacker may consume LOCK ON for +1 Accuracy against it. No attack roll — click toggles your sensor range." },
-];
+// ---- TECHS tab: Invade / Quick Tech / Full Tech reference -----------------------
+// These are REFERENCE chips — hover shows the lavender header with the rules
+// text, click PINS it. They never roll; the TECH ATTACK button above does that.
+// Every mech has these universal options; the rest port straight from the
+// pilot's installed systems and talents (no hard-coding per item).
+const TECH_BASE = {
+  invade: [
+    { name: "Fragment Signal", activation: "Invade", detail: "Tech attack vs E-Defense. On a hit, the target takes 2 Heat and becomes IMPAIRED and SLOWED until the end of its next turn. The basic Invade available to every mech." },
+  ],
+  quick: [
+    { name: "Scan", activation: "Quick Tech", detail: "Choose a character within Sensors and line of sight: learn its full stat block, one piece of hidden GM information about it, or its last orders. No attack roll." },
+    { name: "Lock On", activation: "Quick Tech", detail: "Choose a character within Sensors and line of sight: it gains LOCK ON. Any attacker may consume LOCK ON for +1 Accuracy against it, and it can be hit by tech even through cover." },
+  ],
+  full: [
+    { name: "Stabilize", activation: "Full Tech", detail: "Choose one — COOL: clear all Heat and end Burning, then either clear one of Impaired/Exposed or spend a Repair to restore HP to full. PATCH: reload all LOADING weapons, OR clear a condition from an adjacent ally, OR give an adjacent ally the benefits of cooling." },
+  ],
+};
 
-function renderInvades(m) {
-  const wrap = $("invades");
+// Bucket a tech action by activation. Invade → INVADE; anything "full" → FULL
+// TECH; everything else (Quick Tech, Quick, Protocol, Reaction…) → QUICK TECH.
+// Each chip still shows its TRUE activation in its header, so nothing is misread.
+function techBucket(activation) {
+  const a = (activation || "").toLowerCase();
+  if (a.includes("invade")) return "invade";
+  if (a.includes("full")) return "full";
+  return "quick";
+}
+
+function gatherTechActions(m) {
+  const groups = {
+    invade: TECH_BASE.invade.map((x) => ({ ...x })),
+    quick: TECH_BASE.quick.map((x) => ({ ...x })),
+    full: TECH_BASE.full.map((x) => ({ ...x })),
+  };
+  const add = (name, activation, detail, src) => {
+    if (!name) return;
+    groups[techBucket(activation)].push({ name, activation: activation || "Tech", detail: detail || "", src });
+  };
+  // Mechanical text (effect / action detail) — NOT the flavour the SYSTEMS tab shows.
+  for (const sys of m.systems) {
+    for (const a of sys.actionsFull || []) add(a.name, a.activation, a.detail || sys.effect, sys.name);
+  }
+  for (const t of resolveTalents(currentPilot?.talents || [])) {
+    for (const a of t.actions || []) add(a.name, a.activation, a.detail, t.name);
+  }
+  return groups;
+}
+
+function renderTechs(m) {
+  const groups = gatherTechActions(m);
+  const fill = (wrapId, list) => {
+    const wrap = $(wrapId);
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    const grpEl = wrap.closest(".tech-group");
+    if (!list.length) { grpEl?.classList.add("hidden"); return; }
+    grpEl?.classList.remove("hidden");
+    list.forEach((opt) => {
+      const div = document.createElement("div");
+      div.className = "system invade";
+      div.textContent = opt.name;
+      const head = `${opt.name} — ${opt.activation}${opt.src && opt.src !== opt.name ? ` · ${opt.src}` : ""}`;
+      const body = opt.detail || "No mechanical description available for this option.";
+      div.addEventListener("mouseenter", (e) => showTip(head, body, e));
+      div.addEventListener("mousemove", moveTooltip);
+      div.addEventListener("mouseleave", hideTooltip);
+      div.addEventListener("click", (e) => clickPin(head, body, e)); // pin only — no roll
+      wrap.appendChild(div);
+    });
+  };
+  fill("invades", groups.invade);
+  fill("quicktech", groups.quick);
+  fill("fulltech", groups.full);
+}
+
+// ---- CORE tab: the frame's core system + any pilot core bonuses -----------------
+function renderCore(m) {
+  const wrap = $("core");
   if (!wrap) return;
   wrap.innerHTML = "";
-  // Any system-granted tech option shows up here: dedicated Invade options
-  // (Markerlight, HUNTER logic, the HORUS OS suites…) plus Quick/Full Tech
-  // actions from installed systems.
-  const sysInvades = [];
-  for (const sys of m.systems) {
-    for (const a of sys.actionsFull || []) {
-      const act = a.activation || "";
-      if (/invade/i.test(act)) {
-        sysInvades.push({ name: `Invade — ${a.name}`, activation: "Quick Tech (Invade)", roll: true, detail: a.detail || sys.description || "" });
-      } else if (/tech/i.test(act)) {
-        sysInvades.push({ name: a.name, activation: act, roll: true, detail: a.detail || sys.description || "" });
-      }
-    }
+  const ci = coreInfo(m.frame);
+  const bonuses = m.coreBonuses || [];
+  if (!ci && !bonuses.length) {
+    wrap.innerHTML = `<div class="muted">No core system or core bonuses on this mech.</div>`;
+    return;
   }
-  [...INVADE_BASE, ...sysInvades].forEach((opt) => {
-    const div = document.createElement("div");
-    div.className = "system invade";
-    div.textContent = opt.name;
-    div.addEventListener("mouseenter", (e) => showTip(`${opt.name} — ${opt.activation}`, opt.detail, e));
-    div.addEventListener("mousemove", moveTooltip);
-    div.addEventListener("mouseleave", hideTooltip);
-    // Scan / Lock On need no roll — clicking them toggles sensor range instead
-    div.addEventListener("click", () =>
-      opt.roll === false ? toggleSensors() : prepareTechAttack(opt.name.toUpperCase())
-    );
-    wrap.appendChild(div);
-  });
+  if (ci) {
+    const card = document.createElement("div");
+    card.className = "weapon corew";
+    card.innerHTML = `
+      <div class="top"><span class="wname">${ICON_FULL}${ci.name}${ci.activation ? ` · ${ci.activation}` : ""}</span></div>
+      <div class="meta core-effect">${ci.description || ""}</div>`;
+    wrap.appendChild(card);
+  }
+  const lbl = document.createElement("div");
+  lbl.className = "tech-grouplbl";
+  lbl.textContent = "CORE BONUSES";
+  wrap.appendChild(lbl);
+  const cbWrap = document.createElement("div");
+  cbWrap.className = "sys-wrap";
+  if (!bonuses.length) {
+    cbWrap.innerHTML = `<div class="muted">None picked up yet.</div>`;
+  } else {
+    bonuses.forEach((c) => {
+      const div = document.createElement("div");
+      div.className = "system corebonus";
+      div.textContent = c.name;
+      const head = `${c.name}${c.source ? ` — ${c.source}` : ""}`;
+      const body = c.effect || c.description || "No effect text in compendium.";
+      div.addEventListener("mouseenter", (e) => showTip(head, body, e));
+      div.addEventListener("mousemove", moveTooltip);
+      div.addEventListener("mouseleave", hideTooltip);
+      div.addEventListener("click", (e) => clickPin(head, body, e));
+      cbWrap.appendChild(div);
+    });
+  }
+  wrap.appendChild(cbWrap);
 }
 
 // ---- systems + talents (hover tooltips) -------------------------------------------
@@ -1213,7 +1309,9 @@ function renderSystems(m) {
     if (sys.activation) bits.push(sys.activation.toUpperCase());
     if (sys.sp != null) bits.push(`${sys.sp} SP`);
     const head = `${sys.name}${bits.length ? " — " + bits.join(" · ") : ""}`;
-    const body = sys.description || "No description in compendium.";
+    // SYSTEMS shows flavour-forward text (the mechanical "what it does" lives in
+    // the TECHS tab); fall back to effect/description if there's no flavour.
+    const body = sys.flavor || sys.effect || sys.description || "No description in compendium.";
     div.addEventListener("mouseenter", (e) => showTip(head, body, e));
     div.addEventListener("mousemove", moveTooltip);
     div.addEventListener("mouseleave", hideTooltip);
@@ -1303,6 +1401,11 @@ function pinTip() {
   if (tipEl.style.display !== "block") return;
   tipPinned = true;
   tipEl.classList.add("pinned");
+  // A pinned tooltip is hand-scrollable (themed scrollbar) — stop the auto
+  // hover-scroll so the two don't fight over scrollTop.
+  stopTipScroll();
+  const b = $("tt-body");
+  if (b) b.scrollTop = 0;
 }
 
 $("tt-close")?.addEventListener("click", (e) => {
@@ -1400,7 +1503,7 @@ async function initDiceTray() {
       sel.addEventListener("change", () => { recolorDicePicker(); saveState(); });
     }
     diceTray = mod.createDiceTray($("dicetray"), {
-      scheme: () => $("scheme")?.value || "union",
+      scheme: () => $("scheme")?.value || "ips",
       sound: () => sndOn,
       height: 348,
     });
@@ -1436,7 +1539,7 @@ function dieIconSvg(type, color) {
 }
 
 function recolorDicePicker() {
-  const key = $("scheme")?.value || "union";
+  const key = $("scheme")?.value || "ips";
   const body = diceMod?.SCHEMES?.[key]?.body || "#9e2b30";
   document.querySelectorAll('#dicepicker .die-btn[data-die]').forEach((btn) => {
     btn.innerHTML = dieIconSvg(btn.dataset.die, body);
@@ -1517,30 +1620,37 @@ $("snd-toggle")?.addEventListener("click", () => {
 refreshSndBtn();
 
 // ---- NHP commentary on a natural 1 ------------------------------------------------
+// Author-controlled constants — rendered as innerHTML so we can break lines
+// (<br>) and glitch a phrase (<span class="glitch-text">). No user input here.
 const NHP_QUIPS = [
   "Such a shame.",
   "Feeling a bit desperate, aren't we?",
-  ">It's alright. >I'm not one to judge.",
-  "It's been a long day. Have some soup.",
-  "I ran the numbers. All of them. You still did that.",
-  "Statistically fascinating. Tactically… less so.",
-  "I will not be mentioning this in the after-action report. You're welcome.",
-  "The dice are not broken. I checked. Twice.",
+  ">It's alright.<br>>I'm not one to judge.",
+  "It's been a long day.<br>Have some soup.",
+  "I ran the numbers. All of them.",
+  "Statistically fascinating.<br>Tactically… less so.",
+  "I will not be mentioning this<br>in the after-action report.<br>You're welcome.",
+  'The dice are not broken.<br><span class="glitch-text">Trust me.</span>',
   "A bold interpretation of 'aim'.",
   "Recalibrating expectations…",
-  "Your ancestors are watching. They've seen worse. Barely.",
-  ">>query: was that intentional?",
+  "Your ancestors are watching.<br>They've seen worse.",
+  ">>Query:<br>Was that intentional?",
+  "It's almost like I had a hand in this.",
+  "In another timeline, perhaps.",
+  "This happened every time.",
+  "In a world without rolls,<br>we would have been heroes.",
+  "In another life, I would have really liked<br>just doing corporate piracy with you.",
 ];
 let quipTimer = 0;
 function showQuip() {
   const el = $("nhp-quip");
   if (!el) return;
-  el.textContent = NHP_QUIPS[Math.floor(Math.random() * NHP_QUIPS.length)];
+  el.innerHTML = NHP_QUIPS[Math.floor(Math.random() * NHP_QUIPS.length)];
   el.classList.remove("show");
   void el.offsetWidth; // restart the CSS animation
   el.classList.add("show");
   clearTimeout(quipTimer);
-  quipTimer = setTimeout(() => el.classList.remove("show"), 3900);
+  quipTimer = setTimeout(() => el.classList.remove("show"), 4200);
 }
 
 // ---- result popup -------------------------------------------------------------
@@ -1614,7 +1724,7 @@ async function prepareWeaponAttack(w, lock) {
 
 // DMG: the weapon's damage dice only — grit is NEVER added to damage.
 // crit=true doubles every die; each pair keeps only its highest result.
-async function prepareWeaponDamage(w, fire, crit) {
+async function prepareWeaponDamage(w, fire, crit, forceOverkill = false) {
   switchToDiceTab();
   if (!(await ensureDiceTray())) return;
   if (diceBusy) return;
@@ -1623,10 +1733,13 @@ async function prepareWeaponDamage(w, fire, crit) {
     setStatus(`${w.name} has no rollable damage.`, "status-err");
     return;
   }
+  const overkill = !!w.overkill || forceOverkill;
+  // Combat Drill keeps the exploding-1s behaviour on top of the RAW reroll.
+  const drill = /combat[ _-]?drill/i.test(w.name || "") || /combat_drill/i.test(w.id || "");
   clearTrayAll();
   hideResult();
   setFlat(parsed.flat);
-  setOverkill(!!w.overkill);
+  setOverkill(overkill);
   setCrit(!!crit); // doRoll doubles the dice (keep highest per pair) when set
   const queueOne = (faces) => {
     if (faces === 3) addQueued("d6", "normal", "d3");
@@ -1637,10 +1750,11 @@ async function prepareWeaponDamage(w, fire, crit) {
     for (let i = 0; i < g.n; i++) queueOne(g.faces);
   }
   setContext(
-    `${w.name.toUpperCase()} — DAMAGE · ${w.damage}${crit ? " · CRIT (dice doubled, keep highest)" : ""}${w.overkill ? " · OVERKILL" : ""}`,
+    `${w.name.toUpperCase()} — DAMAGE · ${w.damage}${crit ? " · CRIT (dice doubled, keep highest)" : ""}${overkill ? (drill ? " · OVERKILL (Combat Drill)" : " · OVERKILL") : ""}`,
     "dmg",
     null
   );
+  pending.combatDrill = drill && overkill; // doRoll reads this for the explosion chain
   if (fire) {
     setTimeout(() => doRoll(), 650); // let the dice hover in before the throw
   }
@@ -1662,11 +1776,15 @@ async function prepareTechAttack(label = "TECH ATTACK") {
 }
 
 // FIRE: chains the locked weapon's damage right after its accuracy roll.
+// Respects the CRIT and OVERKILL toggles, so a crit confirmed by other means
+// (or forced on) still rolls crit damage even if the accuracy total was < 20.
 $("firebtn")?.addEventListener("click", () => {
   const w = pending.followUp;
   if (!w) return;
   $("firebtn").classList.remove("show");
-  prepareWeaponDamage(w, true, pending.crit);
+  const critForce = pending.crit || (critToggle?.checked || false);
+  const okForce = okToggle?.checked || false;
+  prepareWeaponDamage(w, true, critForce, okForce);
 });
 
 // ---- THE roll -------------------------------------------------------------------
@@ -1720,31 +1838,41 @@ async function doRoll() {
       }
     });
 
-    // ---- Overkill: kept damage dice showing 1 explode; +1 Heat per 1
+    // ---- Overkill (Lancer RAW): a damage die showing 1 is REROLLED — the 1 is
+    // replaced, not kept — and the attacker takes +1 Heat per reroll. Rerolls
+    // that come up 1 reroll again, indefinitely.
+    //   Combat Drill exception: the original 1 is still rerolled, but the drill
+    //   ALSO adds a bonus die each time Overkill triggers (so one 1 spawns TWO
+    //   dice — up to 4 on snake-eyes). Both behaviours: the 1 never counts.
+    const critDropCount = dropIdx.size; // everything dropped so far is crit-pairs
     let heat = 0;
     if (overkill) {
+      const drill = !!ctx.combatDrill;
       let iter = 0;
       let scanFrom = 0;
-      while (iter < 8) {
-        const ones = [];
+      while (iter < 40) {
+        const spawn = []; // { type, as }
         for (let i = scanFrom; i < raw.length; i++) {
           if (dropIdx.has(i)) continue;
           const r = raw[i], meta = metas[i];
           if (r.role === "normal" && r.type !== "d20" && effVal(meta, r.value) === 1) {
-            ones.push({ type: r.type, as: meta?.as || null });
+            dropIdx.add(i);        // the 1 is rerolled away — it no longer counts
+            heat += 1;             // +1 Heat per Overkill trigger
+            const reps = drill ? 2 : 1;
+            for (let k = 0; k < reps; k++) spawn.push({ type: r.type, as: meta?.as || null });
           }
         }
-        if (!ones.length) break;
-        heat += ones.length;
+        if (!spawn.length) break;
         scanFrom = raw.length;
-        const extra = await diceTray.rollExtra(ones.map((o) => o.type));
+        const extra = await diceTray.rollExtra(spawn.map((o) => o.type));
         if (!extra || !extra.length) break;
-        ones.forEach((o) => metas.push({ type: o.type, role: "normal", as: o.as, pair: null }));
+        spawn.forEach((o) => metas.push({ type: o.type, role: "normal", as: o.as, pair: null }));
         raw = raw.concat(extra);
         trayQueue = metas.slice();
         iter++;
       }
     }
+    const okDropCount = dropIdx.size - critDropCount;
 
     // ---- compute the Lancer total (paired drops excluded)
     const eff = raw.map((r, i) => ({ ...r, value: effVal(metas[i], r.value) }));
@@ -1761,7 +1889,7 @@ async function doRoll() {
       if (res.d20 === 1) {
         showQuip();
       } else if ((ctx.kind === "atk" || ctx.kind === "tech") && res.total >= 20) {
-        critTxt = "⚡ CRIT (20+)";
+        critTxt = "⚡ CRIT";
         isCrit = true;
       }
     }
@@ -1772,7 +1900,8 @@ async function doRoll() {
       return `${dieName}${tag ? ` ${tag}` : ""}:${d.value}${dropIdx.has(i) ? "✗" : ""}`;
     }).join("  ");
     let detail = facesTxt;
-    if (dropIdx.size) detail += `  | crit: paired dice, ✗ dropped`;
+    if (critDropCount) detail += `  | crit: paired dice, ✗ dropped`;
+    if (okDropCount) detail += `  | overkill: ${okDropCount} ✗ rerolled`;
     if (res.accApplied) detail += `  | ${res.accApplied > 0 ? "+" : ""}${res.accApplied} ${res.accApplied > 0 ? "accuracy" : "difficulty"}`;
     if (flat) detail += `  | ${flat >= 0 ? "+" : ""}${flat} flat`;
     if (heat) detail += `  | +${heat} HEAT (overkill)`;
@@ -1794,8 +1923,8 @@ async function doRoll() {
       pending.followUp = ctx.followUp;
       pending.crit = isCrit;
       $("firebtn").classList.add("show");
-      if (isCrit) $("firebtn").textContent = "⬢ FIRE (CRIT)";
-      else $("firebtn").textContent = "⬢ FIRE";
+      $("firebtn").classList.toggle("crit", isCrit);
+      $("firebtn").textContent = "⬢ FIRE";
     }
     if (heat > 0 && currentMech) {
       pendingHeat = heat;
@@ -1816,7 +1945,7 @@ async function doRoll() {
             label, kind, detail,
             total: res.total,
             crit: critTxt,
-            scheme: $("scheme")?.value || "union",
+            scheme: $("scheme")?.value || "ips",
             dice: raw.map((r) => ({ type: r.type, role: r.role, value: r.value })),
           },
           { destination: "REMOTE" }
@@ -1829,13 +1958,38 @@ async function doRoll() {
     rollBtn?.classList.remove("rolling");
     diceBusy = false;
     updateAdvCount();
-    if (replayQueue.length) setTimeout(pumpReplayQueue, 4000); // let our result breathe
+    // remote rolls replay in their own popup now, so they never wait on us
   }
 }
 $("rolldice")?.addEventListener("click", doRoll);
 
-// ---- remote replays ----------------------------------------------------------------
+// ---- remote replays: a dedicated right-side popup tray --------------------------
+// Other players' rolls replay in their OWN tray on the right, so they never
+// interfere with your dice. The result stays dim until the dice actually land.
+let remoteTray = null;
+let remoteInitPromise = null;
+function ensureRemoteTray() {
+  if (!remoteInitPromise) remoteInitPromise = (async () => {
+    try {
+      const mod = diceMod || await import("./dice3d.js");
+      diceMod = mod;
+      remoteTray = mod.createDiceTray($("remote-dicetray"), {
+        scheme: () => "ips",
+        sound: () => false, // teammates' dice stay quiet on your end
+        height: 170,
+      });
+      remoteTray.resize();
+    } catch (e) {
+      console.warn("[LANCER//UPLINK] remote tray unavailable", e);
+      remoteTray = null;
+    }
+    return remoteTray;
+  })();
+  return remoteInitPromise;
+}
+
 function onRemoteRoll(d) {
+  // Hidden rolls are never broadcast, so everything that arrives here is public.
   logRoll({
     kind: d.kind === "dmg" ? "dmg" : d.kind === "tech" ? "tech" : d.kind === "sys" ? "sys" : "atk",
     remote: true,
@@ -1846,49 +2000,52 @@ function onRemoteRoll(d) {
   });
   try { OBR.notification.show(`${d.who}: ${d.label} → ${d.total}`, "INFO"); } catch (_) {}
 
-  if (!diceTabActive()) return; // tab closed — log + notification suffice
   replayQueue.push(d);
   updateAdvCount();
   pumpReplayQueue();
 }
 
 async function pumpReplayQueue() {
-  if (replayActive || diceBusy) return;
-  if (diceTray && diceTray.isRolling()) { setTimeout(pumpReplayQueue, 600); return; }
+  if (replayActive) return; // popup busy — one teammate roll at a time
+  const tray = await ensureRemoteTray();
+  if (!tray) { replayQueue = []; updateAdvCount(); return; } // no 3D — the log still has it
+  if (tray.isRolling()) { setTimeout(pumpReplayQueue, 400); return; }
   const d = replayQueue.shift();
   if (!d) return;
   replayActive = true;
   updateAdvCount();
+  const popup = $("remote-popup");
+  const res = $("rp-result");
   try {
-    await ensureDiceTray();
-    if (!diceTray) return;
-    const banner = $("remote-banner");
-    banner.textContent = `▸ ${d.who} ROLLS…`;
-    banner.style.display = "block";
-    trayQueue = []; // the replay owns the tray now
-    await diceTray.replay(d.dice || [], 1, d.scheme || null); // roller's colours
-    diceTray.zoomToDice();
-    showResult({
-      total: d.total,
-      sub: `${d.who} — ${d.kind === "dmg" ? "DAMAGE" : d.kind === "tech" ? "TECH" : d.kind === "sys" ? "CHECK" : "ACCURACY"}`,
-      kind: d.kind === "sys" ? "atk" : d.kind || "atk",
-      crit: d.crit || "",
-    });
-    // hold the result a beat, then clean up for the next roll in the queue
-    await new Promise((r) => setTimeout(r, replayQueue.length ? 2800 : 4500));
-    if (!diceBusy && diceTray && !diceTray.isRolling()) {
-      diceTray.clearTray();
-      trayQueue = [];
-      hideResult();
-      diceTray.resetCamera();
-    }
-    banner.style.display = "none";
+    $("rp-who").textContent = d.who || "TABLE";
+    const more = replayQueue.length;
+    $("rp-q").textContent = more ? `+${more} queued` : "";
+    $("rp-label").textContent =
+      d.kind === "dmg" ? "DAMAGE" : d.kind === "tech" ? "TECH" : d.kind === "sys" ? "CHECK" : "ACCURACY";
+    $("rp-total").textContent = "—";
+    $("rp-crit").textContent = "";
+    res.className = "rp-result"; // dim — result not highlighted until it lands
+    if (d.kind === "dmg") res.classList.add("dmg");
+    if (d.kind === "tech") res.classList.add("tech");
+    popup?.classList.add("show");
+    tray.resize();
+    await tray.replay(d.dice || [], 1, d.scheme || null); // roller's faction colours
+    tray.zoomToDice();
+    // reveal + highlight ONLY now that the dice have settled
+    $("rp-total").textContent = String(d.total);
+    $("rp-crit").textContent = d.crit || "";
+    res.classList.add("revealed");
+    // hold long enough to read; quicker when more rolls are waiting
+    await new Promise((r) => setTimeout(r, replayQueue.length ? 2200 : 3400));
+    if (!tray.isRolling()) { tray.clearTray(); tray.resetCamera(); }
+    if (!replayQueue.length) popup?.classList.remove("show"); // slide away when done
   } catch (e) {
-    console.warn("[LANCER//UPLINK] replay failed", e);
+    console.warn("[LANCER//UPLINK] remote replay failed", e);
+    popup?.classList.remove("show");
   } finally {
     replayActive = false;
     updateAdvCount();
-    if (replayQueue.length) pumpReplayQueue();
+    if (replayQueue.length) setTimeout(pumpReplayQueue, 250);
   }
 }
 
@@ -2030,18 +2187,23 @@ function applyUiScale() {
   diceTray?.resize(); // the tray canvas needs to know about the new layout size
   requestAnimationFrame(() => setGmView(gmView)); // re-measure the holo tab slider
 }
-// Keep the page pinned to the bottom while resizing so the A+/A− buttons
-// don't drift off-screen between clicks.
-function fontStep(delta) {
+// Keep the CLICKED button locked under the pointer while the layout reflows,
+// so repeated A+/A− clicks always land on the same spot (the button used to
+// climb away as the boxes grew).
+function fontStep(delta, btn) {
+  const anchor = btn || $("font-plus");
+  const before = anchor ? anchor.getBoundingClientRect().bottom : 0;
   uiScale += delta;
   applyUiScale();
   saveState();
-  requestAnimationFrame(() =>
-    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "auto" })
-  );
+  requestAnimationFrame(() => {
+    if (!anchor) return;
+    const after = anchor.getBoundingClientRect().bottom;
+    window.scrollBy(0, after - before); // re-pin the button's bottom edge
+  });
 }
-$("font-minus")?.addEventListener("click", () => fontStep(-0.05));
-$("font-plus")?.addEventListener("click", () => fontStep(0.05));
+$("font-minus")?.addEventListener("click", (e) => fontStep(-0.05, e.currentTarget));
+$("font-plus")?.addEventListener("click", (e) => fontStep(0.05, e.currentTarget));
 $("font-reset")?.addEventListener("click", () => { uiScale = 1; applyUiScale(); saveState(); });
 
 // ---- click-drag offset: the FIELDS THEMSELVES become draggable -----------------
@@ -2096,9 +2258,13 @@ function refreshGridReadout() {
 // ============================================================== OBR STARTUP ====
 async function recalibrate() {
   try {
-    await hex.calibrate();
+    // Seed calibration with the bonded token so the lattice centres on it.
+    let anchor = null;
+    try { const it = await getBondItem(); if (it) anchor = it.position; } catch (_) {}
+    await hex.calibrate(anchor);
     refreshGridReadout();
     syncCellSlider();
+    await refreshActiveFieldsNow(); // re-place active fields on the aligned grid
   } catch (e) {
     console.warn("[LANCER//UPLINK] calibration failed", e);
     const el = $("grid-readout");

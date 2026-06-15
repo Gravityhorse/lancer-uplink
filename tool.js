@@ -281,7 +281,9 @@ function blastMode(icon) {
         if (a.boost) {
           await showBoostField(`tool-boost-${++boostSeq}`, h, a.size, { color: COLORS[a.shape], name: a.name });
         } else {
-          await placeTemplate(a.shape, hexesInRange(h, a.size, true), { name: a.name });
+          await placeTemplate(a.shape, hexesInRange(h, a.size, true), {
+            name: a.name, originHex: a.shape === "blast" ? h : null,
+          });
         }
       });
     },
@@ -311,6 +313,7 @@ function blastMode(icon) {
         } else {
           await placeTemplate(shape, hexesInRange(origin, n, true), {
             name, n, labelHex: pixelToHex(ev.pointerPosition),
+            originHex: shape === "blast" ? origin : null, // blast marks its centre
           });
         }
       });
@@ -367,7 +370,7 @@ function directionalMode(shape, icon, fn, snap) {
       await placeOnce(() => placeTemplate(shape, hexes, {
         name, n,
         labelHex: farthestHex(hexes, origin),
-        originHex: shape === "line" ? origin : null, // lines mark their origin
+        originHex: origin, // lines AND cones mark their origin tile
       }));
     },
     onToolDragCancel() {

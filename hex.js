@@ -15,8 +15,8 @@ const SQRT3 = Math.sqrt(3);
 
 export const grid = {
   ready: false,
-  pointy: true,           // hex: pointy-top vs flat-top
-  autoPointy: true,       // what calibration detected
+  pointy: false,          // hex: pointy-top vs flat-top — DEFAULT is flat-top
+  autoPointy: false,      // what calibration detected (defaults flat-top)
   R: 75 / SQRT3,          // hex circumradius in px
   S: 150,                 // square cell size in px
   origin: { x: 0, y: 0 }, // a known cell center anchoring the lattice
@@ -64,7 +64,10 @@ function applyCellSize() {
   }
 }
 
-export async function calibrate() {
+// anchor: optional { x, y } (e.g. the bonded token's position) — the lattice
+// origin snaps to the cell nearest it, so MOVE / SENSORS fields sit perfectly
+// centred on your token.
+export async function calibrate(anchor) {
   // The grid API lives at OBR.scene.grid (it belongs to the scene). Older SDK
   // builds exposed OBR.grid — accept either so this never silently breaks.
   const G = (OBR.scene && OBR.scene.grid) || OBR.grid;
@@ -74,22 +77,30 @@ export async function calibrate() {
     grid.dpi = await G.getDpi();
     const type = await G.getType();
     grid.isHexGrid = type === "HEX_VERTICAL" || type === "HEX_HORIZONTAL";
-    grid.autoPointy = type !== "HEX_HORIZONTAL";
+    // Owlbear: HEX_VERTICAL = pointy-top, HEX_HORIZONTAL = flat-top. This is the
+    // authoritative orientation source — far more reliable than guessing from
+    // probe angles (which is what used to make AUTO land on the wrong shape).
+    grid.autoPointy = type === "HEX_VERTICAL";
   } catch (e) {
-    console.warn("[LANCER//UPLINK] grid type/dpi read failed — using defaults", e);
+    console.warn("[LANCER//UPLINK] grid type/dpi read failed — using flat-top defaults", e);
   }
   grid.R = grid.dpi / SQRT3;
   grid.S = grid.dpi;
   applyMode();
 
   try {
-    // Snap an arbitrary point to find one true cell center — this anchors the
-    // whole lattice, which is what makes templates land ON the scene's grid.
-    const c0 = await G.snapPosition({ x: 5000.37, y: 4097.91 });
+    // Snap a point to find one true cell center — this anchors the whole
+    // lattice, which is what makes templates land ON the scene's grid. Seed it
+    // with the bonded token when we have one so the origin centres on it.
+    const seed = anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y)
+      ? { x: anchor.x, y: anchor.y }
+      : { x: 5000.37, y: 4097.91 };
+    const c0 = await G.snapPosition(seed);
     grid.origin = c0;
 
     if (grid.isHexGrid) {
-      // Probe in 12 directions to find adjacent hex centers.
+      // Probe in 12 directions to MEASURE cell spacing (orientation already
+      // comes from getType — the probe no longer flips pointy/flat).
       const neighbors = [];
       const probeDist = grid.dpi * 1.02;
       for (let a = 0; a < 360; a += 30) {
@@ -107,9 +118,6 @@ export async function calibrate() {
         const near = neighbors.filter((n) => n.d < neighbors[0].d * 1.15);
         const spacing = near.reduce((s, n) => s + n.d, 0) / near.length;
         grid.R = spacing / SQRT3;
-        const degMod = (Math.abs(near[0].ang) * 180) / Math.PI % 60;
-        const offAxis = Math.min(degMod, 60 - degMod);
-        grid.autoPointy = offAxis < 15;
         applyMode();
       }
     } else {

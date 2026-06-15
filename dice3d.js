@@ -24,18 +24,21 @@ import * as CANNON from "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/+esm";
 // ---- faction colour schemes -------------------------------------------------
 // Numbers are white across the board for readability. Each faction gets its
 // own engraving pattern (engStyle) carved into every face in gold.
+// Order matters — it drives the picker list. IPS-Northstar is the house
+// default (top); Union sits at the bottom. Colours are deepened/saturated for
+// the stone-crystal look; the glossy clearcoat + env reflections do the rest.
 export const SCHEMES = {
-  union: { label: "Union",           body: "#c01124", num: "#ffffff", emissive: "#3a0008", trace: "#ff8a8a", engStyle: "star" },
-  ssc:   { label: "SSC",             body: "#e2a51b", num: "#ffffff", emissive: "#4a3300", trace: "#ffe9b0", engStyle: "lotus" },
-  horus: { label: "HORUS",           body: "#13923f", num: "#ffffff", emissive: "#03350f", trace: "#7dffb0", glitch: true, engStyle: "tech" },
-  ha:    { label: "Harrison Armory", body: "#6d28d9", num: "#ffffff", emissive: "#220747", trace: "#d6b7ff", engStyle: "rigid" },
-  ips:   { label: "IPS-Northstar",   body: "#1e5fd6", num: "#ffffff", emissive: "#06183f", trace: "#9fd2ff", engStyle: "naval" },
+  ips:   { label: "IPS-Northstar",   body: "#1750cf", num: "#ffffff", emissive: "#08204f", trace: "#a8d8ff", engStyle: "naval" },
+  ssc:   { label: "SSC",             body: "#e7a40c", num: "#ffffff", emissive: "#5a3d00", trace: "#ffeab0", engStyle: "lotus" },
+  horus: { label: "HORUS",           body: "#0e9b3c", num: "#ffffff", emissive: "#04400f", trace: "#7dffb0", glitch: true, engStyle: "tech" },
+  ha:    { label: "Harrison Armory", body: "#6320e0", num: "#ffffff", emissive: "#2a0a54", trace: "#d6b7ff", engStyle: "rigid" },
+  union: { label: "Union",           body: "#c80f24", num: "#ffffff", emissive: "#48000a", trace: "#ff8a8a", engStyle: "star" },
 };
 
 // Crystal accent dice — Accuracy: deep blue with gold numbers; Difficulty:
 // royal purple with white numbers. Engraved in silver, gem-facet pattern.
-const ACC = { body: "#1d4ed8", num: "#ffd76a", emissive: "#102a6e", trace: "#f0c75e", engStyle: "gem" };
-const DIS = { body: "#5b21b6", num: "#ffffff", emissive: "#220a45", trace: "#cdb6f0", engStyle: "gem" };
+const ACC = { body: "#1842e6", num: "#ffd76a", emissive: "#0a2a8c", trace: "#ffe08a", engStyle: "gem" };
+const DIS = { body: "#6a18d8", num: "#ffffff", emissive: "#2c0a68", trace: "#dcb8ff", engStyle: "gem" };
 
 // Die geometry + which face is read after settling.
 const DIE = {
@@ -142,12 +145,19 @@ function techTexture(baseColor, traceColor) {
     ctx.globalCompositeOperation = "source-over";
   }
   ctx.globalCompositeOperation = "saturation";
-  ctx.fillStyle = "hsl(0, 94%, 50%)"; // deep, vivid colour — these should POP
+  ctx.fillStyle = "hsl(0, 100%, 50%)"; // max saturation — these should POP
   ctx.fillRect(0, 0, s, s);
+  // deepen the midtones: overlay the base hue back on for richer, jewel depth
+  ctx.globalCompositeOperation = "overlay";
+  ctx.globalAlpha = 0.38;
+  ctx.fillStyle = baseColor;
+  ctx.fillRect(0, 0, s, s);
+  ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = "source-over";
-  const rg = ctx.createRadialGradient(s / 2, s / 2, s * 0.1, s / 2, s / 2, s * 0.75);
-  rg.addColorStop(0, "rgba(255,255,255,0.16)");
-  rg.addColorStop(1, "rgba(0,0,0,0.22)");
+  // stronger centre-to-edge falloff reads as gemstone curvature/weight
+  const rg = ctx.createRadialGradient(s / 2, s * 0.42, s * 0.08, s / 2, s / 2, s * 0.78);
+  rg.addColorStop(0, "rgba(255,255,255,0.22)");
+  rg.addColorStop(1, "rgba(0,0,0,0.34)");
   ctx.fillStyle = rg;
   ctx.fillRect(0, 0, s, s);
 
@@ -334,8 +344,8 @@ function numberTexture(value, fg, underline = false, engColor = "#d9b44a", engSt
 // ---- the tray controller -------------------------------------------------------
 export function createDiceTray(container, opts = {}) {
   let schemeKeyOverride = null; // replay() paints dice in the ROLLER's colours
-  const getSchemeKey = () => schemeKeyOverride || opts.scheme?.() || "union";
-  const getScheme = () => SCHEMES[getSchemeKey()] || SCHEMES.union;
+  const getSchemeKey = () => schemeKeyOverride || opts.scheme?.() || "ips";
+  const getScheme = () => SCHEMES[getSchemeKey()] || SCHEMES.ips;
 
   const W = container.clientWidth || 360;
   const H = opts.height || 300;
@@ -366,6 +376,35 @@ export function createDiceTray(container, opts = {}) {
   key.shadow.camera.top = TRAY; key.shadow.camera.bottom = -TRAY;
   key.shadow.mapSize.set(1024, 1024);
   scene.add(key);
+
+  // ---- environment map: gives the glossy clearcoat real reflections ----------
+  // A tiny equirect "hangar" (dark walls + a couple of bright strip lights),
+  // PMREM-filtered into an env map. This is what turns the dice from flat
+  // plastic into wet-looking stone/crystal — specular streaks slide across the
+  // facets as they tumble. Wrapped so a WebGL hiccup never bricks the tray.
+  try {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    pmrem.compileEquirectangularShader();
+    const es = 256;
+    const ecv = document.createElement("canvas");
+    ecv.width = es * 2; ecv.height = es;
+    const ec = ecv.getContext("2d");
+    const g = ec.createLinearGradient(0, 0, 0, es);
+    g.addColorStop(0.0, "#43536e");  // cool ceiling glow
+    g.addColorStop(0.5, "#141a26");
+    g.addColorStop(1.0, "#04060a");  // dark deck
+    ec.fillStyle = g; ec.fillRect(0, 0, es * 2, es);
+    ec.fillStyle = "rgba(190,225,255,0.95)";  // bright strip lights → hard speculars
+    ec.fillRect(es * 0.18, es * 0.10, es * 0.5, es * 0.05);
+    ec.fillRect(es * 1.10, es * 0.16, es * 0.6, es * 0.04);
+    ec.fillStyle = "rgba(120,230,255,0.5)";
+    ec.fillRect(0, es * 0.30, es * 2, es * 0.012);
+    const eTex = new THREE.CanvasTexture(ecv);
+    eTex.mapping = THREE.EquirectangularReflectionMapping;
+    scene.environment = pmrem.fromEquirectangular(eTex).texture;
+    eTex.dispose();
+    pmrem.dispose();
+  } catch (e) { /* env map is a nicety — never fatal */ }
 
   // ---- hangar-deck floor: hex-etched plating with a soft emissive glow -------
   function hexFloorTexture() {
@@ -559,25 +598,29 @@ export function createDiceTray(container, opts = {}) {
     // Accuracy / Difficulty: crystal — glassy, faintly translucent, iridescent.
     const mat = isCrystal
       ? new THREE.MeshPhysicalMaterial({
+          // CRYSTAL: deep, glassy gemstone — high clearcoat + iridescence, low
+          // roughness so the env strip-lights cut sharp speculars across facets
           map: techTexture(c.body, c.trace || "#ffffff"),
           color: "#ffffff",
-          transparent: true, opacity: 0.96,
-          roughness: 0.15, metalness: 0.15,
-          clearcoat: 1.0, clearcoatRoughness: 0.08,
-          iridescence: 0.45, iridescenceIOR: 1.4,
+          transparent: true, opacity: 0.97,
+          roughness: 0.07, metalness: 0.25,
+          clearcoat: 1.0, clearcoatRoughness: 0.04,
+          iridescence: 0.55, iridescenceIOR: 1.5,
+          envMapIntensity: 1.35,
           emissive: new THREE.Color(c.emissive || "#000000"),
-          emissiveIntensity: 0.35,
+          emissiveIntensity: 0.42,
           flatShading: true,
         })
       : new THREE.MeshPhysicalMaterial({
-          // polished STONE: barely metallic, matte mineral body under a
-          // lacquer-thin clearcoat — heavy, not plasticky
+          // polished STONE: deep saturated mineral body under a thick wet
+          // clearcoat — heavy and glossy, never plasticky
           map: techTexture(c.body, c.trace || "#ffffff"),
           color: "#ffffff",
-          roughness: 0.34, metalness: 0.06,
-          clearcoat: 0.55, clearcoatRoughness: 0.22,
+          roughness: 0.28, metalness: 0.12,
+          clearcoat: 0.9, clearcoatRoughness: 0.12,
+          envMapIntensity: 0.85,
           emissive: new THREE.Color(c.emissive || "#000000"),
-          emissiveIntensity: 0.3,
+          emissiveIntensity: 0.36,
           flatShading: true,
         });
     const mesh = new THREE.Mesh(geometry, mat);
