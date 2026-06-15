@@ -260,6 +260,32 @@ function applyStatBonuses(stats, bonuses) {
   }
 }
 
+// Weapon range bonuses from core bonuses / systems — Gyges (+1 Threat to Melee),
+// Neurolink Targeting (+3 Range to ranged weapons), External Batteries, etc.
+const RANGE_FIELD = { range: "range", threat: "threat", blast: "blast", line: "line", cone: "cone", burst: "burst" };
+function applyRangeBonuses(weapon, rangeBonuses) {
+  for (const b of rangeBonuses || []) {
+    const val = Number(b.val);
+    if (!Number.isFinite(val)) continue;
+    // weapon-type filter (absent = all weapon types)
+    if (Array.isArray(b.weapon_types) && b.weapon_types.length) {
+      const wt = String(weapon.type || "").toLowerCase();
+      if (!b.weapon_types.some((t) => String(t).toLowerCase() === wt)) continue;
+    }
+    // damage-type filter (absent = any)
+    if (Array.isArray(b.damage_types) && b.damage_types.length) {
+      const dts = (weapon.damageTypes || []).map((x) => x.toLowerCase());
+      if (!b.damage_types.some((t) => dts.includes(String(t).toLowerCase()))) continue;
+    }
+    const rts = (Array.isArray(b.range_types) && b.range_types.length) ? b.range_types : ["Range"];
+    for (const rt of rts) {
+      const f = RANGE_FIELD[String(rt).toLowerCase()];
+      // only boost a range the weapon actually has (don't give a melee a Range)
+      if (f && (weapon[f] || 0) > 0) weapon[f] += val;
+    }
+  }
+}
+
 export function resolveMech(mechRaw, pilot) {
   // Prefer the frame embedded in the export; fall back to the CDN compendium.
   const frame = mechRaw.frameData || findFrame(mechRaw.frameId);
@@ -319,6 +345,15 @@ export function resolveMech(mechRaw, pilot) {
     label: mt.type ? `${mt.type.toUpperCase()} MOUNT` : `MOUNT ${i + 1}`,
     weapons: mt.weapons.map(resolveWeapon).filter(Boolean),
   }));
+
+  // Weapon range bonuses (id "range") come from core bonuses + systems and are
+  // applied to each matching weapon — they change display AND template sizing.
+  const rangeBonuses = [];
+  for (const c of coreBonuses) for (const b of (c.bonuses || [])) if (b.id === "range") rangeBonuses.push(b);
+  for (const sysObj of systems) for (const b of (sysObj.bonuses || [])) if (b.id === "range") rangeBonuses.push(b);
+  if (rangeBonuses.length) {
+    for (const mt of mounts) for (const wp of mt.weapons) applyRangeBonuses(wp, rangeBonuses);
+  }
 
   return { name: mechRaw.name, stats, mounts, systems, coreBonuses, frameTraits, current: mechRaw.current, frame };
 }
@@ -538,6 +573,7 @@ export function resolveWeapon(ref) {
   return {
     id, name: w.name, mountSize: w.mount, type: w.type,
     range, threat, blast, cone, line, burst, damage,
+    damageTypes: dmgList.map((d) => String(d.type || "")).filter(Boolean),
     overkill: tags.includes("tg_overkill"),
     loading: tags.includes("tg_loading"),
     accurate: tags.includes("tg_accurate"),

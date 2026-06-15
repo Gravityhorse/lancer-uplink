@@ -727,7 +727,7 @@ function updateBondUI() {
   const el = $("bond-status");
   if (!el) return;
   el.textContent = bond
-    ? `BONDED: ${bond.name || bond.id} — fields snap to this token and follow it.`
+    ? `BONDED: ${bond.name || bond.id}`
     : "UNBONDED — fields are placed by clicking the map.";
   el.classList.toggle("on", !!bond);
 }
@@ -933,8 +933,7 @@ function renderCC(s) {
           if (live.hp === 0) structureDamage();
         }
       } else if (k === "heat" && d > 0) {
-        if (live.heat >= s.heatMax) overheatDamage();
-        else live.heat++;
+        applyHeat(1); // cascades into Stress past Heat Capacity
       } else {
         live[k] = Math.max(0, Math.min(maxes[k], live[k] + d));
       }
@@ -978,21 +977,32 @@ function structureDamage() {
     if (macroOn()) rollStructureTable();
   } else {
     live.hp = 0;
-    logRoll({ kind: "sys", title: "STRUCTURE 0 — MECH DESTROYED", detail: "The frame comes apart." });
+    logRoll({ kind: "sys", title: "STRUCTURE 0 — MECH DESTROYED", detail: "" });
     setStatus("STRUCTURE 0 — mech destroyed.", "status-err");
   }
 }
 
-function overheatDamage() {
+// Apply a Heat change. Positive heat that exceeds Heat Capacity cascades into
+// Stress — and keeps going if the overflow is large enough to blow through
+// several stress levels at once — carrying the remainder into the next level.
+function applyHeat(amount) {
+  if (!currentMech || !live) return;
   const s = currentMech.stats;
-  live.stress = Math.max(0, live.stress - 1);
-  live.heat = 0;
-  if (live.stress > 0) {
-    logRoll({ kind: "sys", title: "OVERHEAT", detail: `Reactor stress ${live.stress}/${s.stressMax} — heat clears to 0.` });
-    if (macroOn()) rollOverheatTable();
-  } else {
-    logRoll({ kind: "sys", title: "STRESS 0 — REACTOR MELTDOWN", detail: "Catastrophic reactor failure." });
-    setStatus("STRESS 0 — reactor meltdown.", "status-err");
+  if (amount < 0) { live.heat = Math.max(0, live.heat + amount); return; }
+  live.heat += amount;
+  let guard = 0;
+  while (live.heat > s.heatMax && guard++ < 50) {
+    live.stress = Math.max(0, live.stress - 1);
+    live.heat -= s.heatMax; // carry the overflow into the next stress level
+    if (live.stress > 0) {
+      logRoll({ kind: "sys", title: "OVERHEAT", detail: `Reactor stress ${live.stress}/${s.stressMax} — heat carries to ${live.heat}/${s.heatMax}.` });
+      if (macroOn()) rollOverheatTable();
+    } else {
+      live.heat = 0;
+      logRoll({ kind: "sys", title: "STRESS 0 — REACTOR MELTDOWN", detail: "" });
+      setStatus("STRESS 0 — reactor meltdown.", "status-err");
+      break;
+    }
   }
 }
 
@@ -1254,7 +1264,17 @@ function gatherTechActions(m) {
 
 function renderTechs(m) {
   const groups = gatherTechActions(m);
-  const fill = (wrapId, list, icon) => {
+  // The action-economy glyph lives ONCE on each group header (the chips are
+  // uniform within a group): half-hex Invade/Quick, full-hex Full, empty Protocols.
+  const setLabel = (grpId, icon, text) => {
+    const lbl = document.querySelector(`#${grpId} .tech-grouplbl`);
+    if (lbl) lbl.innerHTML = `${icon}<span>${text}</span>`;
+  };
+  setLabel("grp-invade", ICON_QUICK, "INVADE");
+  setLabel("grp-quick", ICON_QUICK, "QUICK TECH");
+  setLabel("grp-full", ICON_FULL, "FULL TECH");
+  setLabel("grp-protocols", ICON_FREE, "PROTOCOLS");
+  const fill = (wrapId, list) => {
     const wrap = $(wrapId);
     if (!wrap) return;
     wrap.innerHTML = "";
@@ -1263,8 +1283,8 @@ function renderTechs(m) {
     grpEl?.classList.remove("hidden");
     list.forEach((opt) => {
       const div = document.createElement("div");
-      div.className = "system invade techchip";
-      div.innerHTML = `${icon}<span>${opt.name}</span>`;
+      div.className = "system invade";
+      div.textContent = opt.name;
       const head = `${opt.name} — ${opt.activation}${opt.src && opt.src !== opt.name ? ` · ${opt.src}` : ""}`;
       const body = opt.detail || "No mechanical description available for this option.";
       div.addEventListener("mouseenter", (e) => showTip(head, body, e));
@@ -1274,11 +1294,10 @@ function renderTechs(m) {
       wrap.appendChild(div);
     });
   };
-  // Invade & Quick Tech = half-hex (quick), Full Tech = full-hex, Protocols = empty-hex
-  fill("invades", groups.invade, ICON_QUICK);
-  fill("quicktech", groups.quick, ICON_QUICK);
-  fill("fulltech", groups.full, ICON_FULL);
-  fill("protocols", groups.protocols, ICON_FREE);
+  fill("invades", groups.invade);
+  fill("quicktech", groups.quick);
+  fill("fulltech", groups.full);
+  fill("protocols", groups.protocols);
 }
 
 // ---- CORE tab: core system + core bonuses + frame chassis traits ----------------
@@ -1578,7 +1597,8 @@ function dieIconSvg(type, color) {
 
 function recolorDicePicker() {
   const key = $("scheme")?.value || "ips";
-  const body = diceMod?.SCHEMES?.[key]?.body || "#9e2b30";
+  // before dice3d loads, paint IPS-N blue (the default) — not Union red
+  const body = diceMod?.SCHEMES?.[key]?.body || "#1750cf";
   document.querySelectorAll('#dicepicker .die-btn[data-die]').forEach((btn) => {
     btn.innerHTML = dieIconSvg(btn.dataset.die, body);
   });
@@ -1728,8 +1748,7 @@ $("resultclear")?.addEventListener("click", () => {
 $("heatapply")?.addEventListener("click", () => {
   if (!pendingHeat || !currentMech || !live) return;
   const s = currentMech.stats;
-  if (live.heat + pendingHeat > s.heatMax) overheatDamage();
-  else live.heat += pendingHeat;
+  applyHeat(pendingHeat); // cascades into Stress, carrying any overflow
   onLiveChanged();
   setStatus(`Applied +${pendingHeat} Heat (now ${live.heat}/${s.heatMax}).`, "status-ok");
   pendingHeat = 0;
@@ -2179,7 +2198,9 @@ $("clearranges")?.addEventListener("click", async () => {
 
 // ---- grid calibration controls -----------------------------------------------
 $("grid-mode")?.addEventListener("change", () => {
-  hex.setGridOverride($("grid-mode").value);
+  const v = $("grid-mode").value;
+  hex.setGridOverride(v);
+  if (v === "auto") { recalibrate(); syncCellSlider(); } // AUTO re-fits the scene
   refreshGridReadout();
   refreshActiveFields(); // live update
   saveState();
@@ -2343,6 +2364,9 @@ function refreshGridReadout() {
 // ============================================================== OBR STARTUP ====
 async function recalibrate() {
   try {
+    // In AUTO mode, behave like FIT TO SCENE: drop any manual tile-size override
+    // so the grid fully re-fits whenever auto re-triggers.
+    if (!hex.grid.modeOverride) hex.setCellSize(null);
     // Seed calibration with the bonded token so the lattice centres on it.
     let anchor = null;
     try { const it = await getBondItem(); if (it) anchor = it.position; } catch (_) {}

@@ -349,7 +349,8 @@ export function createDiceTray(container, opts = {}) {
 
   const W = container.clientWidth || 360;
   const H = opts.height || 300;
-  const TRAY = 9;
+  const TRAY = 9;     // half-depth (front/back, z)
+  const TRAY_X = 7.4; // half-width (left/right, x) — tighter so dice stay on-camera
   const HOVER_Y = 6.4; // staging altitude — held high, close to camera, long drop
 
   const CAM_HOME = new THREE.Vector3(0, 21, 8.5);
@@ -372,7 +373,7 @@ export function createDiceTray(container, opts = {}) {
   const key = new THREE.DirectionalLight(0xffffff, 1.0);
   key.position.set(6, 18, 8);
   key.castShadow = true;
-  key.shadow.camera.left = -TRAY; key.shadow.camera.right = TRAY;
+  key.shadow.camera.left = -TRAY_X; key.shadow.camera.right = TRAY_X;
   key.shadow.camera.top = TRAY; key.shadow.camera.bottom = -TRAY;
   key.shadow.mapSize.set(1024, 1024);
   scene.add(key);
@@ -460,7 +461,7 @@ export function createDiceTray(container, opts = {}) {
     emissive: 0x2bb7e0, emissiveMap: floorTex, emissiveIntensity: 0.22,
     roughness: 0.9, metalness: 0.1,
   });
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(TRAY * 2, TRAY * 2), floorMat);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(TRAY_X * 2, TRAY * 2), floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
@@ -473,7 +474,7 @@ export function createDiceTray(container, opts = {}) {
     const N = 70;
     const pos = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) {
-      pos[i * 3] = (Math.random() - 0.5) * TRAY * 1.9;
+      pos[i * 3] = (Math.random() - 0.5) * TRAY_X * 1.9;
       pos[i * 3 + 1] = Math.random() * 5;
       pos[i * 3 + 2] = (Math.random() - 0.5) * TRAY * 1.9;
     }
@@ -514,11 +515,11 @@ export function createDiceTray(container, opts = {}) {
       g.rotation.y = ry;
       scene.add(g);
     };
-    mkWall(TRAY * 2, 0, -TRAY, 0);
-    mkWall(TRAY * 2, 0, TRAY, 0);
-    mkWall(TRAY * 2, -TRAY, 0, Math.PI / 2);
-    mkWall(TRAY * 2, TRAY, 0, Math.PI / 2);
-    for (const [px, pz] of [[-TRAY, -TRAY], [TRAY, -TRAY], [-TRAY, TRAY], [TRAY, TRAY]]) {
+    mkWall(TRAY_X * 2, 0, -TRAY, 0);          // back wall (spans the width)
+    mkWall(TRAY_X * 2, 0, TRAY, 0);           // front wall
+    mkWall(TRAY * 2, -TRAY_X, 0, Math.PI / 2); // left wall (brought in)
+    mkWall(TRAY * 2, TRAY_X, 0, Math.PI / 2);  // right wall
+    for (const [px, pz] of [[-TRAY_X, -TRAY], [TRAY_X, -TRAY], [-TRAY_X, TRAY], [TRAY_X, TRAY]]) {
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, wallH + 0.25, 6), postMat);
       post.position.set(px, (wallH + 0.25) / 2, pz);
       scene.add(post);
@@ -570,8 +571,8 @@ export function createDiceTray(container, opts = {}) {
   };
   wall(0, -TRAY, 0);
   wall(0, TRAY, Math.PI);
-  wall(-TRAY, 0, Math.PI / 2);
-  wall(TRAY, 0, -Math.PI / 2);
+  wall(-TRAY_X, 0, Math.PI / 2); // side walls brought in so dice stay on-camera
+  wall(TRAY_X, 0, -Math.PI / 2);
 
   // dice: { type, role, mesh, body, faces, values, read, staged, basePos, phase,
   //         forceTo (replay target value), snap ({from,to,t} quaternion tween) }
@@ -846,7 +847,7 @@ export function createDiceTray(container, opts = {}) {
         die.body.wakeUp();
         // converge toward the tray centre so the dice stay on-camera
         die.body.velocity.set(
-          (Math.random() - 0.5) * s * 0.7,
+          (Math.random() - 0.5) * s * 0.5, // less sideways spread — stay on-camera
           2 + Math.random() * 2,
           -(1.5 + Math.random() * 3.5)
         );

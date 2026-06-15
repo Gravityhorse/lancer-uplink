@@ -169,11 +169,11 @@
       /* TECHS sub-groups — all share the Invade blue; chips carry an action glyph */
       .tech-group { margin-top: 10px; }
       .tech-group.hidden { display: none; }
-      .tech-grouplbl { font-size: 10px; color: var(--muted); letter-spacing: 2px; font-weight: 700; margin: 0 0 5px; padding-left: 6px; border-left: 3px solid var(--tech); }
+      .tech-grouplbl { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); letter-spacing: 2px; font-weight: 700; margin: 0 0 5px; padding-left: 6px; border-left: 3px solid var(--tech); }
       .tech-grouplbl.core-lbl { border-left-color: #2faa5b; } /* CORE groups are green */
-      .system.techchip { display: inline-flex; align-items: center; gap: 5px; }
-      .system.techchip .acticon { color: var(--tech); flex: none; }
-      #grp-protocols .system.techchip .acticon { color: #9fd2ff; }
+      /* the action-economy glyph sits once on the group header */
+      .tech-grouplbl .acticon { width: 13px; height: 13px; color: var(--tech); flex: none; }
+      #grp-protocols .tech-grouplbl .acticon { color: #9fd2ff; }
       /* CORE tab */
       .weapon.corew { border-left-color: #2faa5b; }
       .weapon.corew .acticon { color: #5ad17a; }
@@ -410,7 +410,7 @@
       <header>
         <img id="hdr-icon" src="./icons/tool.svg" alt="mode" title="Toggle MISSION//CONTROL (GM view)" onerror="this.style.display='none'" />
         <h1 id="hdr-title">LANCER<span class="slash">//</span>UPLINK</h1>
-        <span class="ver">v2.8.4</span>
+        <span class="ver">v2.8.5</span>
         <span id="conn-dot" title="Owlbear link status"></span>
       </header>
       <nav class="tabs" id="tabnav">
@@ -648,7 +648,7 @@
           <summary>HOUSE RULES</summary>
           <div class="body">
             <label class="chk"><input id="macro-toggle" type="checkbox" /> AUTO STRUCTURE / OVERHEAT TABLE ROLLS</label>
-            <p class="muted" style="margin:6px 0 0; line-height:1.5">When HP hits 0 (−1 Structure, HP refills) or Heat exceeds cap (−1 Stress, heat clears), automatically roll the structure / overheating table and post the result to the combat log.</p>
+            <p class="muted" style="margin:6px 0 0; line-height:1.5">When HP hits 0 or Heat exceeds Heat Capacity, automatically roll the structure / overheating table and post the results to the Combat Log.</p>
             <label style="margin-top:12px">UI text size <span id="font-val" style="color:var(--text);font-family:var(--mono)">100%</span></label>
             <div class="row">
               <button id="font-minus" class="btn ghost small" title="Smaller text">A−</button>

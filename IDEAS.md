@@ -45,6 +45,27 @@ bang-for-buck.
 - ✓ Trimmed the four instructional blurbs (Range Fields / Token Bond /
   Templates / Invade)
 
+## Shipped in 2.8.5 ✓
+
+- ✓ **Heat now cascades**: adding heat past Heat Capacity carries the overflow
+  into the next Stress level(s) — a big spike can blow through several at once
+  (unit-tested)
+- ✓ **Core-bonus weapon range mods** apply: Gyges +1 Threat to melee, Neurolink
+  Targeting +3 Range to ranged, External Batteries, etc. — affects the sheet and
+  the placed template's size; only boosts a range a weapon actually has
+- ✓ Dice picker pre-loads IPS-N blue (no more Union-red flash on startup)
+- ✓ Tray side walls pulled in and throw spread tightened so dice stop rolling
+  off-camera; scales cleanly on resize
+- ✓ TECHS action glyphs moved onto the group headers (uniform per group) — chips
+  are clean text now
+- ✓ Move tool uses a hand icon + grab cursor; Eraser uses a white cursor (no more
+  red "no" circle)
+- ✓ AUTO grid fully re-fits the scene whenever it triggers (acts like FIT TO
+  SCENE); sliders already navy
+- ✓ Trimmed text: bond status, House Rules (cap→Heat Capacity, result→results,
+  combat log→Combat Log, parentheticals removed), and the Structure/Stress 0
+  flavour lines
+
 ## Shipped in 2.8.4 ✓
 
 - ✓ **Crit × Overkill resolution reordered**: every 1 is rerolled first (+1 Heat

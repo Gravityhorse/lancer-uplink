@@ -444,7 +444,7 @@ export async function registerTool() {
   await OBR.tool.createMode({
     id: MODES.move,
     icons: [{ icon: iconUrl("select.svg"), label: "Move", filter: { activeTools: [TOOL] } }],
-    cursors: [{ cursor: "move" }],
+    cursors: [{ cursor: "grab" }], // hand, like Owlbear's own move tool
     preventDrag: {},
   });
 
@@ -452,10 +452,13 @@ export async function registerTool() {
   await OBR.tool.createMode(directionalMode("cone", iconUrl("cone.svg"), hexCone, true));
   await OBR.tool.createMode(directionalMode("line", iconUrl("line.svg"), hexLine, false));
 
+  // white eraser cursor (data-URI SVG) — replaces the red "not-allowed" circle
+  const eraseCursor =
+    "url(\"data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='22'%20height='22'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='white'%20stroke-width='2.2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M4%2015%20L11%208%20L18%2015%20L13%2020%20L9%2020%20Z'/%3E%3Cline%20x1='6'%20y1='20'%20x2='20'%20y2='20'/%3E%3C/svg%3E\") 4 18, crosshair";
   await OBR.tool.createMode({
     id: MODES.erase,
     icons: [{ icon: iconUrl("erase.svg"), label: "Erase", filter: { activeTools: [TOOL] } }],
-    cursors: [{ cursor: "not-allowed" }],
+    cursors: [{ cursor: eraseCursor }],
     async onToolClick(_ctx, ev) {
       await eraseAt(ev.pointerPosition);
     },
