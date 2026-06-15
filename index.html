@@ -83,6 +83,8 @@
       .filebtn:hover { border-color: var(--crimson); color: var(--text); }
       .filebtn input { display: none; }
       #status { margin-top: 8px; font-size: 12px; color: var(--muted); min-height: 16px; font-family: var(--mono); }
+      /* once a pilot sheet is showing, hide the status line under Core — cleaner */
+      #sheet:not(.hidden) ~ #status { display: none; }
       .status-ok { color: var(--good) !important; }
       .status-err { color: #ff6b6b !important; }
 
@@ -118,6 +120,11 @@
       .segbar { display: flex; gap: 3px; flex: 1; height: 16px; padding: 0 6px; }
       .segbar .seg { flex: 1; background: #262b33; border: 1px solid #10131a; transform: skewX(-24deg); min-width: 4px; }
       .segbar .seg.on { background: var(--segc, var(--hpblue)); box-shadow: 0 0 5px var(--segc, var(--hpblue)) inset; }
+      /* multi-row bar (NPC HP/HEAT) — wraps every 20 segments, stacking upward */
+      .segbar.multi { flex-direction: column; gap: 3px; height: auto; padding: 0 6px; }
+      .segbar.multi .segrow { display: flex; gap: 3px; width: 100%; min-height: 12px; }
+      .segbar.multi .segrow .seg { flex: 1; min-width: 0; }
+      .segbar .seg.spacer { visibility: hidden; border-color: transparent; }
       .ccrow .pm, .pp { width: 20px; height: 20px; flex: none; background: var(--panel-2); border: 1px solid var(--line); color: var(--text); cursor: pointer; font-family: var(--mono); font-size: 13px; line-height: 1; border-radius: 3px; padding: 0; }
       .ccrow .pm:hover, .pp:hover { border-color: var(--crimson); }
       .pp { width: 16px; height: 16px; font-size: 11px; vertical-align: middle; }
@@ -386,7 +393,8 @@
       /* left-hand max-value stepper on HP / HEAT rows */
       .maxstep { display: inline-flex; align-items: center; gap: 2px; flex: none; }
       .maxstep b { min-width: 16px; text-align: center; font-family: var(--mono); font-size: 10px; color: var(--text); }
-      .npc-card .lc-barrow .k { width: 34px; flex: none; }
+      /* HP / HEAT labels left-aligned to line up with EVA / SPD below */
+      .npc-card .lc-barrow .k { width: 34px; flex: none; text-align: left; }
       .lc-pips { display: flex; gap: 12px; padding: 0 10px 8px; font-family: var(--mono); font-size: 10px; color: var(--muted); flex-wrap: wrap; }
       .lc-pips span { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
       .lc-pips b { color: var(--text); }
@@ -410,7 +418,7 @@
       <header>
         <img id="hdr-icon" src="./icons/tool.svg" alt="mode" title="Toggle MISSION//CONTROL (GM view)" onerror="this.style.display='none'" />
         <h1 id="hdr-title">LANCER<span class="slash">//</span>UPLINK</h1>
-        <span class="ver">v2.8.5</span>
+        <span class="ver">v2.8.6</span>
         <span id="conn-dot" title="Owlbear link status"></span>
       </header>
       <nav class="tabs" id="tabnav">
@@ -430,7 +438,7 @@
               Click to upload a COMP/CON pilot or roster export (.json)
               <input id="pilotfile" type="file" accept=".json,application/json" />
             </label>
-            <p class="muted" style="margin:6px 0 0">COMP/CON: <b>Pilot Roster → Export → Download pilot as JSON</b>. Your pilot is remembered between sessions; re-upload to update.</p>
+            <p class="muted" style="margin:6px 0 0">COMP/CON: <b>Pilot Roster → Export → Download pilot as JSON</b>. Your pilot is remembered between sessions. Re-upload to update.</p>
             <div id="pilotpicker" class="hidden">
               <label>Pilot</label>
               <select id="pilotselect"></select>

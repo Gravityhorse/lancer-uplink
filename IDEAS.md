@@ -45,6 +45,17 @@ bang-for-buck.
 - ✓ Trimmed the four instructional blurbs (Range Fields / Token Bond /
   Templates / Invade)
 
+## Shipped in 2.8.6 ✓
+
+- ✓ Target-lock accuracy roll drops the "[LOCK: FIRE after accuracy]" tag
+- ✓ NPC cards: HP/HEAT labels left-aligned with EVA/SPD, and HP bars now WRAP
+  every 20 into rows that stack upward (cap 60 = three rows) instead of shoving
+  the numbers off-card
+- ✓ Move tool uses the white LANCER hex (matches the toolbar) with a normal
+  cursor
+- ✓ Import hint: "remembered between sessions. Re-upload to update."
+- ✓ The status line under Core is hidden once a pilot sheet is showing
+
 ## Shipped in 2.8.5 ✓
 
 - ✓ **Heat now cascades**: adding heat past Heat Capacity carries the overflow

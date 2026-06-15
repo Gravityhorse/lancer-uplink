@@ -443,8 +443,9 @@ export async function registerTool() {
   // operation "which mimics the Move tool" (pan + drag tokens); clicks select.
   await OBR.tool.createMode({
     id: MODES.move,
+    // white LANCER hex (matches the toolbar logo + other mode icons)
     icons: [{ icon: iconUrl("select.svg"), label: "Move", filter: { activeTools: [TOOL] } }],
-    cursors: [{ cursor: "grab" }], // hand, like Owlbear's own move tool
+    cursors: [{ cursor: "default" }], // just the normal pointer
     preventDrag: {},
   });
 

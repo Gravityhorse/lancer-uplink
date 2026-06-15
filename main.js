@@ -349,7 +349,7 @@ $("nf-save-btn")?.addEventListener("click", () => {
     ...base,
     name: $("nf-name").value.trim() || "NPC",
     tier: existing?.tier || "", // tier kept for imports; no longer a form field
-    hpMax: Math.max(1, num("nf-hp", 10)),
+    hpMax: Math.max(1, Math.min(60, num("nf-hp", 10))),
     heatMax: Math.max(0, num("nf-heat", 6)),
     evasion: num("nf-eva", 8),
     edef: num("nf-edef", 8),
@@ -478,9 +478,9 @@ function renderNpcs() {
           <button class="btn ghost small" data-act="del">✕</button>
         </span>
       </div>
-      <div class="lc-barrow"><span class="k">HP</span><span class="maxstep" title="Adjust max HP"><button class="pp" data-max="hp" data-d="-1">−</button><b>${n.hpMax}</b><button class="pp" data-max="hp" data-d="1">+</button></span>${segBar(n.hp, n.hpMax, "var(--hpblue)")}<span class="v">${n.hp}/${n.hpMax}</span>
+      <div class="lc-barrow"><span class="k">HP</span><span class="maxstep" title="Adjust max HP"><button class="pp" data-max="hp" data-d="-1">−</button><b>${n.hpMax}</b><button class="pp" data-max="hp" data-d="1">+</button></span>${segBarRows(n.hp, n.hpMax, "var(--hpblue)")}<span class="v">${n.hp}/${n.hpMax}</span>
         <button class="pp" data-act="hp" data-d="-1" title="Current HP">−</button><button class="pp" data-act="hp" data-d="1" title="Current HP">+</button></div>
-      <div class="lc-barrow"><span class="k">HEAT</span><span class="maxstep" title="Adjust heat capacity"><button class="pp" data-max="heat" data-d="-1">−</button><b>${n.heatMax}</b><button class="pp" data-max="heat" data-d="1">+</button></span>${segBar(n.heat, Math.max(1, n.heatMax), "var(--heatred)")}<span class="v">${n.heat}/${n.heatMax}</span>
+      <div class="lc-barrow"><span class="k">HEAT</span><span class="maxstep" title="Adjust heat capacity"><button class="pp" data-max="heat" data-d="-1">−</button><b>${n.heatMax}</b><button class="pp" data-max="heat" data-d="1">+</button></span>${segBarRows(n.heat, Math.max(1, n.heatMax), "var(--heatred)")}<span class="v">${n.heat}/${n.heatMax}</span>
         <button class="pp" data-act="heat" data-d="-1" title="Current heat">−</button><button class="pp" data-act="heat" data-d="1" title="Current heat">+</button></div>
       <div class="lc-pips lc-edit" style="padding:6px 0 0">
         ${statStep("EVA", "evasion", n.evasion)}
@@ -520,7 +520,7 @@ function renderNpcs() {
     card.querySelectorAll(".pp[data-max]").forEach((b) => {
       b.addEventListener("click", () => {
         const k = b.dataset.max, d = Number(b.dataset.d);
-        if (k === "hp") { n.hpMax = Math.max(1, n.hpMax + d); if (n.hp > n.hpMax) n.hp = n.hpMax; }
+        if (k === "hp") { n.hpMax = Math.max(1, Math.min(60, n.hpMax + d)); if (n.hp > n.hpMax) n.hp = n.hpMax; }
         if (k === "heat") { n.heatMax = Math.max(0, n.heatMax + d); if (n.heat > n.heatMax) n.heat = n.heatMax; }
         saveNpcs();
         renderNpcs();
@@ -891,6 +891,30 @@ function segBar(cur, max, color) {
     segs += `<span class="seg ${i < cur ? "on" : ""}" style="--segc:${color}"></span>`;
   }
   return `<span class="segbar">${segs}</span>`;
+}
+
+// Like segBar, but wraps into rows of `perRow`, stacking UPWARD (bottom row =
+// 1..20), so a big HP pool (capped at 60) doesn't shove the numbers off-card.
+// Each row is padded to perRow with hidden cells so the columns stay aligned.
+function segBarRows(cur, max, color, perRow = 20) {
+  const total = Math.max(1, Math.min(perRow * 3, max));
+  // up to one row: fill the width like the standard bar (no sparse padding)
+  if (total <= perRow) {
+    let segs = "";
+    for (let i = 0; i < total; i++) segs += `<span class="seg ${i < cur ? "on" : ""}" style="--segc:${color}"></span>`;
+    return `<span class="segbar">${segs}</span>`;
+  }
+  // more than perRow: wrap into rows, padded to perRow so columns stay aligned
+  const rows = [];
+  for (let start = 0; start < total; start += perRow) {
+    let segs = "";
+    for (let i = start; i < start + perRow; i++) {
+      if (i < total) segs += `<span class="seg ${i < cur ? "on" : ""}" style="--segc:${color}"></span>`;
+      else segs += `<span class="seg spacer"></span>`;
+    }
+    rows.push(`<span class="segrow">${segs}</span>`);
+  }
+  return `<span class="segbar multi">${rows.reverse().join("")}</span>`; // row 1..20 at the bottom
 }
 
 function renderCC(s) {
@@ -1789,7 +1813,7 @@ async function prepareWeaponAttack(w, lock) {
   if (w.accurate) { addQueued("d6", "acc"); tagNote += "  · ACCURATE (+1 Acc)"; }
   if (w.inaccurate) { addQueued("d6", "dis"); tagNote += "  · INACCURATE (+1 Diff)"; }
   setContext(
-    `${w.name.toUpperCase()} — ATTACK · d20 +${grit} GRIT${tagNote}${lock ? "  [LOCK: FIRE after accuracy]" : ""}`,
+    `${w.name.toUpperCase()} — ATTACK · d20 +${grit} GRIT${tagNote}`,
     "atk",
     lock ? w : null
   );
