@@ -751,7 +751,7 @@ export function createDiceTray(container, opts = {}) {
 
   // Stage dice in a hover grid above the tray (only the given dice; default all).
   function stage(subset) {
-    const list = subset || dice;
+    const list = (subset || dice).filter((d) => !d.hidden);
     const n = list.length;
     if (!n) return;
     const cols = Math.ceil(Math.sqrt(n));
@@ -782,6 +782,17 @@ export function createDiceTray(container, opts = {}) {
     return dice.length;
   }
   function addAccDie(role) { return addDie("d6", role); } // role: "acc" | "dis"
+
+  // Pull a die OFF the tray (an Overkill 1 that got rerolled). The slot is kept
+  // so indices stay aligned with the caller's parallel arrays; the mesh just
+  // goes invisible and the physics body leaves the world.
+  function hideDie(index) {
+    const d = dice[index];
+    if (!d || d.hidden) return;
+    d.hidden = true;
+    d.mesh.visible = false;
+    try { world.removeBody(d.body); } catch (_) {}
+  }
 
   function clearTray() {
     if (rolling) return;
@@ -922,12 +933,13 @@ export function createDiceTray(container, opts = {}) {
   }
 
   function zoomToDice() {
-    if (!dice.length) return;
+    const live = dice.filter((d) => !d.hidden);
+    if (!live.length) return;
     const center = new THREE.Vector3();
-    dice.forEach((d) => center.add(d.mesh.position));
-    center.multiplyScalar(1 / dice.length);
+    live.forEach((d) => center.add(d.mesh.position));
+    center.multiplyScalar(1 / live.length);
     let radius = 2;
-    dice.forEach((d) => { radius = Math.max(radius, center.distanceTo(d.mesh.position) + 1.6); });
+    live.forEach((d) => { radius = Math.max(radius, center.distanceTo(d.mesh.position) + 1.6); });
     // pull the camera in along its home direction, scaled to fit the cluster
     const dist = Math.max(7, radius * 2.6);
     const dir = CAM_HOME.clone().sub(new THREE.Vector3(center.x, 0, center.z)).normalize();
@@ -957,6 +969,7 @@ export function createDiceTray(container, opts = {}) {
     world.step(1 / 60, dt, 4);
 
     dice.forEach((die) => {
+      if (die.hidden) return; // rerolled-away dice no longer move or render
       if (die.staged) {
         // hover bob + nervous jitter above the tray
         const bob = Math.sin(now * 3.1 + die.phase) * 0.16;
@@ -1046,7 +1059,7 @@ export function createDiceTray(container, opts = {}) {
   }
 
   return {
-    addDie, addAccDie, clearTray, listDice, roll, rollExtra, replay,
+    addDie, addAccDie, hideDie, clearTray, listDice, roll, rollExtra, replay,
     zoomToDice, resetCamera, stageView, resize, dispose,
     count: () => dice.length,
     isRolling: () => rolling,

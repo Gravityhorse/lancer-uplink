@@ -45,29 +45,57 @@ bang-for-buck.
 - ✓ Trimmed the four instructional blurbs (Range Fields / Token Bond /
   Templates / Invade)
 
-## Notes & next suggestions (post-2.8.3, Claude)
+## Shipped in 2.8.4 ✓
 
-Things I noticed while building 2.8.3 that you didn't list but are worth doing:
+- ✓ **Crit × Overkill resolution reordered**: every 1 is rerolled first (+1 Heat
+  each, including 1s sitting in a crit pair), THEN highest-of-pair is kept —
+  exhaustively unit-tested
+- ✓ **Combat Drill Overclock**: a molten OVERCLOCK button appears next to FIRE
+  after target-locking the drill. FIRE = standard Overkill; OVERCLOCK = the
+  exploding "dice hydra" (a 1 spawns a reroll + a bonus die; under crit the
+  bonus is its own doubled pair, all recursive, Heat per 1)
+- ✓ Overkill now visually pulls the rerolled 1 OFF the 3D tray (no lingering 1s)
+- ✓ Accurate weapons auto-add an Accuracy die, Inaccurate a Difficulty die;
+  Reliable N floors damage to N (noted in the combat log)
+- ✓ **Weapon mods**: a box under each weapon shows the mod (or "NO WEAPON MOD"),
+  hover for its effect; mod bonus damage rolls into FIRE automatically
+- ✓ **TECHS gains a PROTOCOLS group** (Protocol + free non-weapon actions like
+  Transmuting Spark). Deployables (Lotus Projector) surface as "Deploy X" Quick
+  Tech. Action glyphs per group: half-hex (Invade/Quick), full-hex (Full),
+  empty-hex (Protocols). All tech labels blue; Core groups green; TECHS header
+  deepened
+- ✓ Free/reactionary WEAPONS (Autogun, Autopod) get the empty-hex glyph
+- ✓ **CORE tab gains FRAME TRAITS** (Scout/Cloak/etc.) below Core Bonuses
+- ✓ Frame traits / core bonuses that grant tech-attack accuracy (Goblin's
+  **Liturgicode**) auto-add the Accuracy die to TECH ATK
+- ✓ A native **Move** mode leads the LANCER tool bar (Move/Blast/Cone/Line/
+  Erase) — pans the board and selects tokens like Owlbear's own tool
+- ✓ Mission Control: ADD NPC form no longer overflows; fields reordered (HP,
+  Heat Capacity, Speed, Sensors, Armor, Save, Evasion, E-Defense), Tier removed;
+  HP/Heat rows get a LEFT max stepper (adjust totals) beside the existing
+  current stepper
+- ✓ Grid AUTO is the default again and re-runs on grid type/size change; range
+  sliders are navy, not the bright Windows blue
+- ✓ Flat / Crit / Overkill reset when you leave the DICE tab
 
-- **Combat Drill is unconditional right now.** RAW, the bonus die only triggers
-  vs a Prone / Immobilized / Stunned target. Uplink can't see the target's
-  condition, so per your spec it always explodes. A small "drill bonus active"
-  toggle on the FIRE bar would make it rules-exact when you want it.
-- **Lock On / Accurate / Reliable aren't wired into the dice.** A "consume Lock
-  On (+1 Acc)" checkbox on the attack bar, auto-adding an Accuracy die for
-  *Accurate* weapons / a Difficulty die for *Inaccurate*, and a damage floor for
-  *Reliable*, would remove a lot of manual fiddling.
-- **Some tech options can't auto-sort.** Quick/Full Tech grouping reads each
-  action's `activation`. Systems whose ability is a deployable with no action
-  (e.g. **Lotus Projector**) have nothing to sort on, so they only appear under
-  SYSTEMS. Could fall back to a system-level "deploy" classification.
+## Notes & next suggestions (post-2.8.4, Claude)
+
+Decisions worth knowing, and ideas still on the table:
+
+- **Combat Drill Overclock is opt-in via the molten button** (you choose when
+  the prone/immobilized/stunned bonus applies, since Uplink can't see the target
+  condition). Standard FIRE is plain Overkill.
+- **Reactions still ride in Quick Tech** (each chip shows its true activation).
+  Now that PROTOCOLS exists, a dedicated REACTIONS group would be a clean follow.
 - **Content-pack talents** (e.g. Iconoclast) only surface their tech actions if
-  COMP/CON embedded the talent data in the export. If it only references the id
-  and the talent isn't in public `lancer-data`, the actions can't be shown —
-  worth confirming against your actual file; if it's a problem, a small
-  user-supplied LCP cache would fix it.
-- **Reactions/Protocols** are folded into Quick Tech (each chip still shows its
-  true activation). A dedicated "Reactions" group could be cleaner.
+  COMP/CON embedded the talent data in the export. The parser reads embedded
+  data, but if your export only references the id and it isn't in public
+  `lancer-data`, the actions can't be shown — worth confirming against your file.
+- **Lock On isn't auto-consumed yet.** A "consume Lock On (+1 Acc)" checkbox on
+  the attack bar (that clears after the roll) would finish the tag automation.
+- **Mod-added tags beyond damage**: a mod that grants Overkill/Reliable is
+  honoured, but mod-added *range/threat* changes aren't merged into the template
+  sizing yet.
 - **Loading / Ordnance tracking** (grey out ATK after firing until Reload).
 - **Conditions tracker** (Impaired, Jammed, Lock On, Exposed) that also stamps
   the bonded token — pairs naturally with the new TECHS panel.

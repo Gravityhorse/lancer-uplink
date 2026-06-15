@@ -7,7 +7,7 @@ const DATA_SOURCES = [
   "https://unpkg.com/lancer-data/lib",
 ];
 
-const compendium = { frames: null, weapons: null, systems: null, talents: null, coreBonuses: null, loaded: false };
+const compendium = { frames: null, weapons: null, systems: null, talents: null, coreBonuses: null, mods: null, loaded: false };
 
 async function fetchJson(file) {
   for (const base of DATA_SOURCES) {
@@ -22,18 +22,20 @@ async function fetchJson(file) {
 export async function loadCompendium(onStatus) {
   if (compendium.loaded) return compendium;
   onStatus?.("Downloading compendium...");
-  const [frames, weapons, systems, talents, coreBonuses] = await Promise.all([
+  const [frames, weapons, systems, talents, coreBonuses, mods] = await Promise.all([
     fetchJson("frames.json"),
     fetchJson("weapons.json"),
     fetchJson("systems.json"),
     fetchJson("talents.json"),
     fetchJson("core_bonuses.json"),
+    fetchJson("mods.json"),
   ]);
   compendium.frames = frames || [];
   compendium.weapons = weapons || [];
   compendium.systems = systems || [];
   compendium.talents = talents || [];
   compendium.coreBonuses = coreBonuses || [];
+  compendium.mods = mods || [];
   compendium.loaded = !!(frames && weapons);
   onStatus?.(compendium.loaded ? "Compendium online." : "Compendium offline - manual mode available.");
   return compendium;
@@ -49,6 +51,8 @@ export const findTalent = (id) =>
   compendium.talents?.find((t) => t.id === id) || null;
 export const findCoreBonus = (id) =>
   compendium.coreBonuses?.find((c) => c.id === id) || null;
+export const findMod = (id) =>
+  compendium.mods?.find((m) => m.id === id) || null;
 
 // ---- pilot file parsing -----------------------------------------------------
 
@@ -118,7 +122,12 @@ function gatherMounts(loadout) {
     if (!mt) return;
     const slots = [...(mt.slots || []), ...(mt.extra || [])];
     const weapons = slots
-      .map((s) => normEquip(s?.weapon))
+      .map((s) => {
+        const w = normEquip(s?.weapon);
+        // COMP/CON hangs the weapon mod off the slot (or the weapon itself)
+        if (w) w.mod = normEquip(s?.mod || s?.weapon?.mod);
+        return w;
+      })
       .filter((w) => w && (w.id || w.data));
     if (weapons.length) {
       mounts.push({ type: mt.mount_type || mt.type || "Mount", weapons });
@@ -223,6 +232,21 @@ const BONUS_STAT = {
   attack: "attackBonus", repcap: "repMax",
 };
 
+// Some frame traits / core bonuses grant accuracy specifically on tech attacks
+// (Goblin's Liturgicode: "+1 accuracy on tech attacks"). Detect from the text
+// so it can be auto-applied to the TECH ATK roll.
+function detectTechAccuracy(texts) {
+  let n = 0;
+  for (const txt of texts) {
+    const s = String(txt || "");
+    if (/tech\s*attack/i.test(s) && /accuracy/i.test(s) && !/difficulty/i.test(s)) {
+      const m = s.match(/\+\s*(\d+)\s*accuracy|accuracy\s*\+\s*(\d+)/i);
+      n += m ? Number(m[1] || m[2]) : 1;
+    }
+  }
+  return n;
+}
+
 function applyStatBonuses(stats, bonuses) {
   for (const b of bonuses || []) {
     if (!b) continue;
@@ -279,12 +303,24 @@ export function resolveMech(mechRaw, pilot) {
   for (const s of systems) applyStatBonuses(stats, s.bonuses);
   for (const c of coreBonuses) applyStatBonuses(stats, c.bonuses);
 
+  // Frame chassis traits (Scout/Cloak/etc.) for the CORE tab.
+  const frameTraits = (frame?.traits || []).map((t) => ({
+    name: t.name || "Trait",
+    description: effectText(t.description || t.effect || ""),
+  }));
+
+  // Auto tech-attack accuracy from traits / core bonuses (Liturgicode…).
+  stats.techAccuracy = detectTechAccuracy([
+    ...frameTraits.map((t) => t.description),
+    ...coreBonuses.map((c) => c.effect),
+  ]);
+
   const mounts = mechRaw.mounts.map((mt, i) => ({
     label: mt.type ? `${mt.type.toUpperCase()} MOUNT` : `MOUNT ${i + 1}`,
     weapons: mt.weapons.map(resolveWeapon).filter(Boolean),
   }));
 
-  return { name: mechRaw.name, stats, mounts, systems, coreBonuses, current: mechRaw.current, frame };
+  return { name: mechRaw.name, stats, mounts, systems, coreBonuses, frameTraits, current: mechRaw.current, frame };
 }
 
 // pilot core-bonus ids → [{ id, name, source, effect, description, bonuses }]
@@ -349,12 +385,21 @@ export function resolveSystem(ref) {
     flavor,
     bonuses: Array.isArray(data.bonuses) ? data.bonuses : [],
     // full action list, so Invade options / Quick & Full Tech granted by
-    // systems can be surfaced in the TECHS tab
-    actionsFull: acts.map((a) => ({
-      name: a.name || data.name || fallbackName,
-      activation: String(a.activation || "").trim(),
-      detail: effectText(a.detail || a.description || ""),
-    })),
+    // systems can be surfaced in the TECHS tab. Deployables (Lotus Projector…)
+    // have no explicit action, but deploying one is a Quick action — synthesize
+    // a "Deploy X" entry so it lands in Quick Tech.
+    actionsFull: [
+      ...acts.map((a) => ({
+        name: a.name || data.name || fallbackName,
+        activation: String(a.activation || "").trim(),
+        detail: effectText(a.detail || a.description || ""),
+      })),
+      ...(Array.isArray(data.deployables) ? data.deployables : []).map((dep) => ({
+        name: `Deploy ${dep.name || data.name || fallbackName}`,
+        activation: dep.activation || "Quick",
+        detail: effectText(dep.detail || data.effect || ""),
+      })),
+    ],
   };
 }
 
@@ -415,6 +460,31 @@ export function coreInfo(frame) {
   };
 }
 
+// Weapon mod hanging off a mount slot. Returns null when the slot has no mod.
+export function resolveMod(ref) {
+  if (!ref) return null;
+  const r = typeof ref === "string" ? { id: ref, data: null } : ref;
+  const id = r.id || r.data?.id || "";
+  if (!id && !(r.data && r.data.id)) return null;
+  const data = r.data || findMod(id);
+  const fallback = (id || "").replace(/^wm_/, "").replace(/_/g, " ") || "Weapon Mod";
+  if (!data) return { id, name: fallback, sp: null, effect: "", addedDamage: [], addedTags: [], rawAddedTags: [], actions: [] };
+  return {
+    id,
+    name: data.name || fallback,
+    sp: data.sp ?? null,
+    effect: [effectText(data.effect), effectText(data.description)].filter(Boolean).join("  •  "),
+    addedDamage: Array.isArray(data.added_damage) ? data.added_damage : [],
+    addedTags: (data.added_tags || []).map((t) => t.id || t),
+    rawAddedTags: Array.isArray(data.added_tags) ? data.added_tags : [],
+    actions: (Array.isArray(data.actions) ? data.actions : []).map((a) => ({
+      name: a.name || data.name || fallback,
+      activation: String(a.activation || "").trim(),
+      detail: effectText(a.detail || a.description || ""),
+    })),
+  };
+}
+
 // Accepts either a normalised { id, data, selectedProfile } ref or a bare id.
 export function resolveWeapon(ref) {
   const r = typeof ref === "string" ? { id: ref, data: null } : ref || {};
@@ -443,14 +513,21 @@ export function resolveWeapon(ref) {
     else if (t === "line") line = v;
     else if (t === "burst") burst = v;
   }
-  const damage = (w.damage || [])
+  // A weapon mod can add damage dice and tags — fold both in.
+  const mod = resolveMod(r.mod);
+  const dmgList = [...(w.damage || []), ...(mod ? mod.addedDamage : [])];
+  const damage = dmgList
     .map((d) => `${d.val ?? d.override ?? "?"} ${String(d.type || "").slice(0, 3)}`)
     .join(" + ") || "-";
-  const tags = (w.tags || []).map((t) => t.id || t);
+  const tags = [...(w.tags || []).map((t) => t.id || t), ...(mod ? mod.addedTags : [])];
   // human-readable tag names for the hover tooltip
   const tagNames = tags.map((t) =>
     String(t).replace(/^tg_/, "").replace(/_/g, " ").toUpperCase()
   );
+  // Reliable carries its value on the tag instance (weapon or mod).
+  const rawTags = [...(w.tags || []), ...(mod ? mod.rawAddedTags : [])];
+  const reliableTag = rawTags.find((t) => (t.id || t) === "tg_reliable");
+  const reliable = reliableTag ? (Number(reliableTag.val) || 0) : 0;
   const effect = [
     effectText(w.effect),
     w.on_attack ? `ON ATTACK: ${effectText(w.on_attack)}` : "",
@@ -463,6 +540,12 @@ export function resolveWeapon(ref) {
     range, threat, blast, cone, line, burst, damage,
     overkill: tags.includes("tg_overkill"),
     loading: tags.includes("tg_loading"),
+    accurate: tags.includes("tg_accurate"),
+    inaccurate: tags.includes("tg_inaccurate"),
+    reliable,
+    // free/reactionary weapons get an empty-hex action icon (Autopod, Autogun…)
+    free: /autopod|autogun|free action|as a reaction/i.test(`${w.name || ""} ${effectText(w.effect)}`),
+    mod,
     tagNames,
     effect,
     icon: weaponIcon(w),

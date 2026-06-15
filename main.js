@@ -45,6 +45,8 @@ let obrReady = false;
 // ---- action-economy icons: full hexagon = Full Action, half = Quick ----------
 const ICON_FULL = `<svg class="acticon" viewBox="0 0 20 20" aria-label="Full action"><polygon points="10,1.5 17.5,5.75 17.5,14.25 10,18.5 2.5,14.25 2.5,5.75" fill="currentColor"/></svg>`;
 const ICON_QUICK = `<svg class="acticon" viewBox="0 0 20 20" aria-label="Quick action"><polygon points="10,1.5 17.5,5.75 17.5,14.25 10,18.5 2.5,14.25 2.5,5.75" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 1.5 L2.5 5.75 L2.5 14.25 L10 18.5 Z" fill="currentColor"/></svg>`;
+// empty hexagon = free / reactionary (outside the normal action economy)
+const ICON_FREE = `<svg class="acticon" viewBox="0 0 20 20" aria-label="Free / reactionary"><polygon points="10,1.5 17.5,5.75 17.5,14.25 10,18.5 2.5,14.25 2.5,5.75" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>`;
 
 // ============================================================ PERSISTENCE =====
 const STORE_KEY = "lancer-uplink/state/v2";
@@ -92,6 +94,7 @@ document.querySelectorAll("nav.tabs button").forEach((btn) => {
       t.classList.toggle("active", t.id === `tab-${tab}`)
     );
     if (tab === "dice") ensureDiceTray();
+    else resetDiceMods(); // leaving DICE clears stale flat/crit/overkill presets
     if (tab === "lancers") requestAnimationFrame(() => setGmView(gmView)); // re-render + holo position
   });
 });
@@ -322,7 +325,6 @@ function openNpcForm(npc) {
   $("npc-form")?.classList.remove("hidden");
   $("nf-id").value = npc?.id || "";
   $("nf-name").value = npc?.name || "";
-  $("nf-tier").value = npc?.tier || "";
   $("nf-hp").value = npc?.hpMax ?? 10;
   $("nf-heat").value = npc?.heatMax ?? 6;
   $("nf-eva").value = npc?.evasion ?? 8;
@@ -346,7 +348,7 @@ $("nf-save-btn")?.addEventListener("click", () => {
   const next = {
     ...base,
     name: $("nf-name").value.trim() || "NPC",
-    tier: $("nf-tier").value.trim(),
+    tier: existing?.tier || "", // tier kept for imports; no longer a form field
     hpMax: Math.max(1, num("nf-hp", 10)),
     heatMax: Math.max(0, num("nf-heat", 6)),
     evasion: num("nf-eva", 8),
@@ -476,10 +478,10 @@ function renderNpcs() {
           <button class="btn ghost small" data-act="del">✕</button>
         </span>
       </div>
-      <div class="lc-barrow"><span class="k">HP</span>${segBar(n.hp, n.hpMax, "var(--hpblue)")}<span class="v">${n.hp}/${n.hpMax}</span>
-        <button class="pp" data-act="hp" data-d="-1">−</button><button class="pp" data-act="hp" data-d="1">+</button></div>
-      <div class="lc-barrow"><span class="k">HEAT</span>${segBar(n.heat, Math.max(1, n.heatMax), "var(--heatred)")}<span class="v">${n.heat}/${n.heatMax}</span>
-        <button class="pp" data-act="heat" data-d="-1">−</button><button class="pp" data-act="heat" data-d="1">+</button></div>
+      <div class="lc-barrow"><span class="k">HP</span><span class="maxstep" title="Adjust max HP"><button class="pp" data-max="hp" data-d="-1">−</button><b>${n.hpMax}</b><button class="pp" data-max="hp" data-d="1">+</button></span>${segBar(n.hp, n.hpMax, "var(--hpblue)")}<span class="v">${n.hp}/${n.hpMax}</span>
+        <button class="pp" data-act="hp" data-d="-1" title="Current HP">−</button><button class="pp" data-act="hp" data-d="1" title="Current HP">+</button></div>
+      <div class="lc-barrow"><span class="k">HEAT</span><span class="maxstep" title="Adjust heat capacity"><button class="pp" data-max="heat" data-d="-1">−</button><b>${n.heatMax}</b><button class="pp" data-max="heat" data-d="1">+</button></span>${segBar(n.heat, Math.max(1, n.heatMax), "var(--heatred)")}<span class="v">${n.heat}/${n.heatMax}</span>
+        <button class="pp" data-act="heat" data-d="-1" title="Current heat">−</button><button class="pp" data-act="heat" data-d="1" title="Current heat">+</button></div>
       <div class="lc-pips lc-edit" style="padding:6px 0 0">
         ${statStep("EVA", "evasion", n.evasion)}
         ${statStep("E-DEF", "edef", n.edef)}
@@ -504,11 +506,22 @@ function renderNpcs() {
         setTimeout(() => { delete del.dataset.armed; del.textContent = "✕"; }, 2500);
       }
     });
+    // right-side steppers adjust the CURRENT value
     card.querySelectorAll(".pp[data-act]").forEach((b) => {
       b.addEventListener("click", () => {
         const k = b.dataset.act, d = Number(b.dataset.d);
         if (k === "hp") n.hp = Math.max(0, Math.min(n.hpMax, n.hp + d));
         if (k === "heat") n.heat = Math.max(0, Math.min(n.heatMax, n.heat + d));
+        saveNpcs();
+        renderNpcs();
+      });
+    });
+    // left-side steppers adjust the MAX (total), clamping current to it
+    card.querySelectorAll(".pp[data-max]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const k = b.dataset.max, d = Number(b.dataset.d);
+        if (k === "hp") { n.hpMax = Math.max(1, n.hpMax + d); if (n.hp > n.hpMax) n.hp = n.hpMax; }
+        if (k === "heat") { n.heatMax = Math.max(0, n.heatMax + d); if (n.heat > n.heatMax) n.heat = n.heatMax; }
         saveNpcs();
         renderNpcs();
       });
@@ -1060,17 +1073,21 @@ function weaponTemplateSpec(w) {
 // Action-economy exceptions: weapons that fire outside the normal
 // Skirmish / Barrage economy.
 const ACTION_OVERRIDES = [
-  { re: /autopod/i, full: false, title: "Protocol — fires automatically at a target with LOCK ON, no attack roll" },
-  { re: /autogun/i, full: false, title: "Automated — fires on its own (see system text)" },
+  { re: /autopod/i, free: true, title: "Free / reactionary — fires automatically at a LOCKED ON target, no attack roll" },
+  { re: /autogun/i, free: true, title: "Free action — fires on its own (see frame trait)" },
   { re: /nexus.*swarm|swarm.*nexus/i, full: false, title: "Quick action (Skirmish) — see nexus rules" },
 ];
 
+// Action-economy glyph: full hex = Barrage (full), half hex = Skirmish (quick),
+// empty hex = free / reactionary (Autogun, Autopod…).
 function weaponActionInfo(w, mountLabel) {
   for (const o of ACTION_OVERRIDES) {
     if (o.re.test(w.name || "")) {
-      return { icon: o.full ? ICON_FULL : ICON_QUICK, title: o.title };
+      const icon = o.free ? ICON_FREE : o.full ? ICON_FULL : ICON_QUICK;
+      return { icon, title: o.title };
     }
   }
+  if (w.free) return { icon: ICON_FREE, title: "Free / reactionary weapon — fires outside the normal attack economy" };
   const isFull = /superheavy/i.test(w.mountSize || "") || /superheavy/i.test(mountLabel || "");
   return isFull
     ? { icon: ICON_FULL, title: "Full action (Barrage — Superheavy weapons cannot Skirmish)" }
@@ -1121,10 +1138,21 @@ function weaponCard(w, mountLabel) {
         <button class="btn small atk-lock" data-act="lock" title="ATK / Target Lock — roll accuracy, then FIRE chains damage">ATK<span class="hexlogo">⬢</span></button>
       </span>
     </div>
+    <div class="wmod${w.mod ? " has-mod" : ""}" data-act="mod">${w.mod ? `◈ ${w.mod.name}${w.mod.sp != null ? ` · ${w.mod.sp} SP` : ""}` : "NO WEAPON MOD"}</div>
     <div class="meta">${[w.mountSize, w.type].filter(Boolean).join(" ")} — ${rangeBits(w)} — <b>${w.damage}</b></div>
     ${tags.length ? `<div class="tags">${tags.join(" · ")}</div>` : ""}
   `;
   el.querySelector('[data-act="lock"]').addEventListener("click", () => prepareWeaponAttack(w, true));
+  // weapon mod box — hover/click shows the mod's mechanical effect
+  if (w.mod) {
+    const modEl = el.querySelector('[data-act="mod"]');
+    const mHead = `${w.mod.name}${w.mod.sp != null ? ` — ${w.mod.sp} SP` : ""}`;
+    const mBody = w.mod.effect || "No effect text in compendium.";
+    modEl.addEventListener("mouseenter", (e) => showTip(mHead, mBody, e));
+    modEl.addEventListener("mousemove", moveTooltip);
+    modEl.addEventListener("mouseleave", hideTooltip);
+    modEl.addEventListener("click", (e) => clickPin(mHead, mBody, e));
+  }
   // hover the weapon name → full tooltip
   const nameEl = el.querySelector('[data-act="info"]');
   const body = [
@@ -1192,13 +1220,14 @@ const TECH_BASE = {
   ],
 };
 
-// Bucket a tech action by activation. Invade → INVADE; anything "full" → FULL
-// TECH; everything else (Quick Tech, Quick, Protocol, Reaction…) → QUICK TECH.
-// Each chip still shows its TRUE activation in its header, so nothing is misread.
+// Bucket a tech action by activation. Invade → INVADE; "full" → FULL TECH;
+// Protocol / Free → PROTOCOLS; everything else (Quick Tech, Quick, Reaction…)
+// → QUICK TECH. Each chip still shows its TRUE activation in its header.
 function techBucket(activation) {
   const a = (activation || "").toLowerCase();
   if (a.includes("invade")) return "invade";
   if (a.includes("full")) return "full";
+  if (a.includes("protocol") || a.includes("free")) return "protocols";
   return "quick";
 }
 
@@ -1207,6 +1236,7 @@ function gatherTechActions(m) {
     invade: TECH_BASE.invade.map((x) => ({ ...x })),
     quick: TECH_BASE.quick.map((x) => ({ ...x })),
     full: TECH_BASE.full.map((x) => ({ ...x })),
+    protocols: [],
   };
   const add = (name, activation, detail, src) => {
     if (!name) return;
@@ -1224,7 +1254,7 @@ function gatherTechActions(m) {
 
 function renderTechs(m) {
   const groups = gatherTechActions(m);
-  const fill = (wrapId, list) => {
+  const fill = (wrapId, list, icon) => {
     const wrap = $(wrapId);
     if (!wrap) return;
     wrap.innerHTML = "";
@@ -1233,8 +1263,8 @@ function renderTechs(m) {
     grpEl?.classList.remove("hidden");
     list.forEach((opt) => {
       const div = document.createElement("div");
-      div.className = "system invade";
-      div.textContent = opt.name;
+      div.className = "system invade techchip";
+      div.innerHTML = `${icon}<span>${opt.name}</span>`;
       const head = `${opt.name} — ${opt.activation}${opt.src && opt.src !== opt.name ? ` · ${opt.src}` : ""}`;
       const body = opt.detail || "No mechanical description available for this option.";
       div.addEventListener("mouseenter", (e) => showTip(head, body, e));
@@ -1244,20 +1274,23 @@ function renderTechs(m) {
       wrap.appendChild(div);
     });
   };
-  fill("invades", groups.invade);
-  fill("quicktech", groups.quick);
-  fill("fulltech", groups.full);
+  // Invade & Quick Tech = half-hex (quick), Full Tech = full-hex, Protocols = empty-hex
+  fill("invades", groups.invade, ICON_QUICK);
+  fill("quicktech", groups.quick, ICON_QUICK);
+  fill("fulltech", groups.full, ICON_FULL);
+  fill("protocols", groups.protocols, ICON_FREE);
 }
 
-// ---- CORE tab: the frame's core system + any pilot core bonuses -----------------
+// ---- CORE tab: core system + core bonuses + frame chassis traits ----------------
 function renderCore(m) {
   const wrap = $("core");
   if (!wrap) return;
   wrap.innerHTML = "";
   const ci = coreInfo(m.frame);
   const bonuses = m.coreBonuses || [];
-  if (!ci && !bonuses.length) {
-    wrap.innerHTML = `<div class="muted">No core system or core bonuses on this mech.</div>`;
+  const traits = m.frameTraits || [];
+  if (!ci && !bonuses.length && !traits.length) {
+    wrap.innerHTML = `<div class="muted">No core system, core bonuses, or frame traits on this mech.</div>`;
     return;
   }
   if (ci) {
@@ -1268,29 +1301,34 @@ function renderCore(m) {
       <div class="meta core-effect">${ci.description || ""}</div>`;
     wrap.appendChild(card);
   }
-  const lbl = document.createElement("div");
-  lbl.className = "tech-grouplbl";
-  lbl.textContent = "CORE BONUSES";
-  wrap.appendChild(lbl);
-  const cbWrap = document.createElement("div");
-  cbWrap.className = "sys-wrap";
-  if (!bonuses.length) {
-    cbWrap.innerHTML = `<div class="muted">None picked up yet.</div>`;
-  } else {
-    bonuses.forEach((c) => {
-      const div = document.createElement("div");
-      div.className = "system corebonus";
-      div.textContent = c.name;
-      const head = `${c.name}${c.source ? ` — ${c.source}` : ""}`;
-      const body = c.effect || c.description || "No effect text in compendium.";
-      div.addEventListener("mouseenter", (e) => showTip(head, body, e));
-      div.addEventListener("mousemove", moveTooltip);
-      div.addEventListener("mouseleave", hideTooltip);
-      div.addEventListener("click", (e) => clickPin(head, body, e));
-      cbWrap.appendChild(div);
-    });
-  }
-  wrap.appendChild(cbWrap);
+  // a green labelled chip group (core bonuses, frame traits)
+  const chipGroup = (label, items, empty) => {
+    const lbl = document.createElement("div");
+    lbl.className = "tech-grouplbl core-lbl";
+    lbl.textContent = label;
+    wrap.appendChild(lbl);
+    const grp = document.createElement("div");
+    grp.className = "sys-wrap";
+    if (!items.length) {
+      grp.innerHTML = `<div class="muted">${empty}</div>`;
+    } else {
+      items.forEach((it) => {
+        const div = document.createElement("div");
+        div.className = "system corebonus";
+        div.textContent = it.name;
+        const head = `${it.name}${it.source ? ` — ${it.source}` : ""}`;
+        const body = it.effect || it.description || "No effect text in compendium.";
+        div.addEventListener("mouseenter", (e) => showTip(head, body, e));
+        div.addEventListener("mousemove", moveTooltip);
+        div.addEventListener("mouseleave", hideTooltip);
+        div.addEventListener("click", (e) => clickPin(head, body, e));
+        grp.appendChild(div);
+      });
+    }
+    wrap.appendChild(grp);
+  };
+  chipGroup("CORE BONUSES", bonuses, "None picked up yet.");
+  if (traits.length) chipGroup("FRAME TRAITS", traits, "None.");
 }
 
 // ---- systems + talents (hover tooltips) -------------------------------------------
@@ -1603,6 +1641,15 @@ const setCrit = (on) => {
 };
 const rollsHidden = () => $("hideroll")?.checked || false;
 
+// Reset the per-roll presets so last gun's flat/crit/overkill don't linger when
+// you come back to the tray. Skipped mid-roll so it can't stomp an active flow.
+function resetDiceMods() {
+  if (diceBusy || replayActive) return;
+  setFlat(0);
+  setOverkill(false);
+  setCrit(false);
+}
+
 // dice sound toggle — subtle speaker button, persisted
 let sndOn = readStore().sound !== false;
 function refreshSndBtn() {
@@ -1667,6 +1714,7 @@ function showResult({ total, sub, kind = "atk", crit = "" }) {
 function hideResult() {
   $("resultbox").classList.remove("show");
   $("firebtn").classList.remove("show");
+  $("overclockbtn")?.classList.remove("show");
   $("heatapply").classList.remove("show");
 }
 $("resultclear")?.addEventListener("click", () => {
@@ -1703,7 +1751,10 @@ function parseDamage(str) {
   return { dice, flat };
 }
 
-// ATK (or ⬢ target lock): d20 + grit, ready to roll.
+const isCombatDrill = (w) => /combat[ _-]?drill/i.test(w?.name || "") || /combat_drill/i.test(w?.id || "");
+
+// ATK (or ⬢ target lock): d20 + grit, ready to roll. Accurate weapons auto-add
+// an Accuracy die; Inaccurate ones auto-add a Difficulty die.
 async function prepareWeaponAttack(w, lock) {
   switchToDiceTab();
   if (!(await ensureDiceTray())) return;
@@ -1715,8 +1766,11 @@ async function prepareWeaponAttack(w, lock) {
   setOverkill(false);
   setCrit(false);
   addQueued("d20", "normal");
+  let tagNote = "";
+  if (w.accurate) { addQueued("d6", "acc"); tagNote += "  · ACCURATE (+1 Acc)"; }
+  if (w.inaccurate) { addQueued("d6", "dis"); tagNote += "  · INACCURATE (+1 Diff)"; }
   setContext(
-    `${w.name.toUpperCase()} — ATTACK · d20 +${grit} GRIT${lock ? "  [LOCK: FIRE after accuracy]" : ""}`,
+    `${w.name.toUpperCase()} — ATTACK · d20 +${grit} GRIT${tagNote}${lock ? "  [LOCK: FIRE after accuracy]" : ""}`,
     "atk",
     lock ? w : null
   );
@@ -1724,7 +1778,7 @@ async function prepareWeaponAttack(w, lock) {
 
 // DMG: the weapon's damage dice only — grit is NEVER added to damage.
 // crit=true doubles every die; each pair keeps only its highest result.
-async function prepareWeaponDamage(w, fire, crit, forceOverkill = false) {
+async function prepareWeaponDamage(w, fire, crit, forceOverkill = false, drill = false) {
   switchToDiceTab();
   if (!(await ensureDiceTray())) return;
   if (diceBusy) return;
@@ -1733,9 +1787,8 @@ async function prepareWeaponDamage(w, fire, crit, forceOverkill = false) {
     setStatus(`${w.name} has no rollable damage.`, "status-err");
     return;
   }
-  const overkill = !!w.overkill || forceOverkill;
-  // Combat Drill keeps the exploding-1s behaviour on top of the RAW reroll.
-  const drill = /combat[ _-]?drill/i.test(w.name || "") || /combat_drill/i.test(w.id || "");
+  // Combat Drill always carries Overkill; OVERCLOCK adds the exploding behaviour.
+  const overkill = !!w.overkill || forceOverkill || drill;
   clearTrayAll();
   hideResult();
   setFlat(parsed.flat);
@@ -1750,11 +1803,12 @@ async function prepareWeaponDamage(w, fire, crit, forceOverkill = false) {
     for (let i = 0; i < g.n; i++) queueOne(g.faces);
   }
   setContext(
-    `${w.name.toUpperCase()} — DAMAGE · ${w.damage}${crit ? " · CRIT (dice doubled, keep highest)" : ""}${overkill ? (drill ? " · OVERKILL (Combat Drill)" : " · OVERKILL") : ""}`,
+    `${w.name.toUpperCase()} — DAMAGE · ${w.damage}${crit ? " · CRIT (dice doubled, keep highest)" : ""}${drill ? " · OVERCLOCK (Combat Drill)" : overkill ? " · OVERKILL" : ""}${w.reliable ? ` · RELIABLE ${w.reliable}` : ""}`,
     "dmg",
     null
   );
-  pending.combatDrill = drill && overkill; // doRoll reads this for the explosion chain
+  pending.combatDrill = !!drill;     // exploding chain only on OVERCLOCK
+  pending.reliable = w.reliable || 0; // damage floor
   if (fire) {
     setTimeout(() => doRoll(), 650); // let the dice hover in before the throw
   }
@@ -1772,20 +1826,29 @@ async function prepareTechAttack(label = "TECH ATTACK") {
   setOverkill(false);
   setCrit(false);
   addQueued("d20", "normal");
-  setContext(`${label} · d20 ${t >= 0 ? "+" : ""}${t} vs E-DEF`, "tech", null);
+  // Frame traits / core bonuses that grant tech-attack accuracy (Liturgicode…)
+  const techAcc = currentMech?.stats?.techAccuracy || 0;
+  let accNote = "";
+  for (let i = 0; i < techAcc; i++) addQueued("d6", "acc");
+  if (techAcc) accNote = `  · +${techAcc} ACC (frame)`;
+  setContext(`${label} · d20 ${t >= 0 ? "+" : ""}${t} vs E-DEF${accNote}`, "tech", null);
 }
 
 // FIRE: chains the locked weapon's damage right after its accuracy roll.
 // Respects the CRIT and OVERKILL toggles, so a crit confirmed by other means
 // (or forced on) still rolls crit damage even if the accuracy total was < 20.
-$("firebtn")?.addEventListener("click", () => {
+// FIRE = standard Overkill; OVERCLOCK = Combat Drill's exploding dice.
+function fireLocked(drill) {
   const w = pending.followUp;
   if (!w) return;
   $("firebtn").classList.remove("show");
+  $("overclockbtn")?.classList.remove("show");
   const critForce = pending.crit || (critToggle?.checked || false);
   const okForce = okToggle?.checked || false;
-  prepareWeaponDamage(w, true, critForce, okForce);
-});
+  prepareWeaponDamage(w, true, critForce, okForce, drill);
+}
+$("firebtn")?.addEventListener("click", () => fireLocked(false));
+$("overclockbtn")?.addEventListener("click", () => fireLocked(true));
 
 // ---- THE roll -------------------------------------------------------------------
 const effVal = (meta, v) => (meta?.as === "d3" ? Math.ceil(v / 2) : v);
@@ -1822,63 +1885,82 @@ async function doRoll() {
     if (!raw || !raw.length) return;
     let metas = trayQueue.slice();
 
-    // ---- crit pairs: keep only the highest die of each pair
-    const eff0 = raw.map((r, i) => ({ ...r, value: effVal(metas[i], r.value) }));
-    const dropIdx = new Set();
-    const pairBest = new Map(); // pair -> { idx, val }
-    eff0.forEach((d, i) => {
-      const p = metas[i]?.pair;
-      if (p == null || d.role !== "normal") return;
-      const cur = pairBest.get(p);
-      if (!cur || d.value > cur.val) {
-        if (cur) dropIdx.add(cur.idx);
-        pairBest.set(p, { idx: i, val: d.value });
-      } else {
-        dropIdx.add(i);
-      }
-    });
-
-    // ---- Overkill (Lancer RAW): a damage die showing 1 is REROLLED — the 1 is
-    // replaced, not kept — and the attacker takes +1 Heat per reroll. Rerolls
-    // that come up 1 reroll again, indefinitely.
-    //   Combat Drill exception: the original 1 is still rerolled, but the drill
-    //   ALSO adds a bonus die each time Overkill triggers (so one 1 spawns TWO
-    //   dice — up to 4 on snake-eyes). Both behaviours: the 1 never counts.
-    const critDropCount = dropIdx.size; // everything dropped so far is crit-pairs
+    // ---- Resolution order (Lancer): reroll EVERY 1 first (Overkill, +1 Heat
+    // each, chaining), THEN keep the highest of each Crit pair. A 1 sitting in a
+    // crit pair is still rerolled and still costs Heat *before* the pair is
+    // judged. Combat Drill Overclock: each rerolled 1 ALSO spawns a bonus die;
+    // under crit that bonus is itself a fresh doubled pair — the dice hydra.
+    const rerolled = new Set(); // indices pulled by an Overkill reroll
     let heat = 0;
     if (overkill) {
       const drill = !!ctx.combatDrill;
-      let iter = 0;
-      let scanFrom = 0;
-      while (iter < 40) {
-        const spawn = []; // { type, as }
+      let scanFrom = 0, guard = 0;
+      while (guard++ < 60) {
+        const spawn = []; // { type, as, pair }
         for (let i = scanFrom; i < raw.length; i++) {
-          if (dropIdx.has(i)) continue;
+          if (rerolled.has(i)) continue;
           const r = raw[i], meta = metas[i];
           if (r.role === "normal" && r.type !== "d20" && effVal(meta, r.value) === 1) {
-            dropIdx.add(i);        // the 1 is rerolled away — it no longer counts
+            rerolled.add(i);
+            diceTray.hideDie(i);   // visually pull the 1 off the 3D tray
             heat += 1;             // +1 Heat per Overkill trigger
-            const reps = drill ? 2 : 1;
-            for (let k = 0; k < reps; k++) spawn.push({ type: r.type, as: meta?.as || null });
+            // the reroll replaces the 1 inside its own pair (keep-highest holds)
+            spawn.push({ type: r.type, as: meta?.as || null, pair: meta?.pair ?? null });
+            if (drill) {
+              // bonus damage die — a fresh doubled pair under crit, else a loner
+              if (critOn) {
+                const bp = ++pairSeq;
+                spawn.push({ type: r.type, as: meta?.as || null, pair: bp });
+                spawn.push({ type: r.type, as: meta?.as || null, pair: bp });
+              } else {
+                spawn.push({ type: r.type, as: meta?.as || null, pair: null });
+              }
+            }
           }
         }
         if (!spawn.length) break;
         scanFrom = raw.length;
         const extra = await diceTray.rollExtra(spawn.map((o) => o.type));
         if (!extra || !extra.length) break;
-        spawn.forEach((o) => metas.push({ type: o.type, role: "normal", as: o.as, pair: null }));
+        spawn.forEach((o) => metas.push({ type: o.type, role: "normal", as: o.as, pair: o.pair }));
         raw = raw.concat(extra);
         trayQueue = metas.slice();
-        iter++;
       }
     }
-    const okDropCount = dropIdx.size - critDropCount;
 
-    // ---- compute the Lancer total (paired drops excluded)
+    // ---- crit pairs: keep only the highest of each pair (AFTER the rerolls)
+    const dropIdx = new Set(rerolled);
+    {
+      const pairBest = new Map(); // pair -> { idx, val }
+      raw.forEach((r, i) => {
+        if (rerolled.has(i)) return;
+        const meta = metas[i];
+        const p = meta?.pair;
+        if (p == null || r.role !== "normal") return;
+        const v = effVal(meta, r.value);
+        const cur = pairBest.get(p);
+        if (!cur || v > cur.val) {
+          if (cur) dropIdx.add(cur.idx);
+          pairBest.set(p, { idx: i, val: v });
+        } else {
+          dropIdx.add(i);
+        }
+      });
+    }
+    const okDropCount = rerolled.size;
+    const critDropCount = dropIdx.size - okDropCount;
+
+    // ---- compute the Lancer total (rerolled + paired drops excluded)
     const eff = raw.map((r, i) => ({ ...r, value: effVal(metas[i], r.value) }));
     const effKept = eff.filter((_, i) => !dropIdx.has(i));
     const compute = window.__computeResult;
     const res = compute(effKept, { keepHighest, flat });
+
+    // ---- Reliable N: weapon damage can't fall below its Reliable value
+    if (ctx.kind === "dmg" && ctx.reliable && res.total < ctx.reliable) {
+      res.reliableFloor = ctx.reliable;
+      res.total = ctx.reliable;
+    }
 
     // crit & labels (Lancer: an attack totalling 20+ crits; nat 1 always whiffs)
     // Lancer crit rule: ANY attack totalling 20+ crits — there are no special
@@ -1905,6 +1987,7 @@ async function doRoll() {
     if (res.accApplied) detail += `  | ${res.accApplied > 0 ? "+" : ""}${res.accApplied} ${res.accApplied > 0 ? "accuracy" : "difficulty"}`;
     if (flat) detail += `  | ${flat >= 0 ? "+" : ""}${flat} flat`;
     if (heat) detail += `  | +${heat} HEAT (overkill)`;
+    if (res.reliableFloor) detail += `  | RELIABLE ${res.reliableFloor} (floored)`;
 
     const label = ctx.label || (res.d20 != null ? "Attack" : "Roll");
     const kind = ctx.kind === "free" ? (res.d20 != null ? "atk" : "dmg") : ctx.kind;
@@ -1925,6 +2008,8 @@ async function doRoll() {
       $("firebtn").classList.add("show");
       $("firebtn").classList.toggle("crit", isCrit);
       $("firebtn").textContent = "⬢ FIRE";
+      // Combat Drill gets a second, molten OVERCLOCK button for the exploding dice
+      $("overclockbtn")?.classList.toggle("show", isCombatDrill(ctx.followUp));
     }
     if (heat > 0 && currentMech) {
       pendingHeat = heat;
@@ -2286,10 +2371,13 @@ async function start() {
     setStatus("Template tool failed to register — check console.", "status-err");
   }
 
-  // 2) Calibrate the grid when (and whenever) a scene is actually ready.
+  // 2) Calibrate the grid when (and whenever) a scene is actually ready, and
+  //    re-AUTO whenever the room's grid itself changes (type / size / dpi).
   try {
     if (await OBR.scene.isReady()) await recalibrate();
     OBR.scene.onReadyChange((ready) => { if (ready) recalibrate(); });
+    const G = (OBR.scene && OBR.scene.grid) || OBR.grid;
+    if (G && typeof G.onChange === "function") G.onChange(() => recalibrate());
   } catch (e) {
     console.warn("[LANCER//UPLINK] scene readiness check failed", e);
   }

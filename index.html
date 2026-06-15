@@ -73,7 +73,7 @@
       details > summary::before { content: "▸ "; }
       details[open] > summary::before { content: "▾ "; }
       details > .body { background: var(--panel); border: 1px solid var(--line); border-top: none; padding: 10px; }
-      details.navyhead > summary { background: #2f3f6e; }
+      details.navyhead > summary { background: #2b4690; } /* TECHS — deeper, more vibrant blue */
       details.goldhead > summary { background: #7a5a1d; }
       details.purplehead > summary { background: #4a2a8f; } /* SYSTEMS — Harrison Armory purple, no longer a 2nd red tab */
       details.greenhead > summary { background: #176e34; } /* CORE — HORUS green */
@@ -166,16 +166,26 @@
       .system.corebonus { border-left: 3px solid #2faa5b; cursor: pointer; }
       .system.corebonus:hover { border-color: #5ad17a; }
 
-      /* TECHS sub-groups (Invade / Quick Tech / Full Tech) */
+      /* TECHS sub-groups — all share the Invade blue; chips carry an action glyph */
       .tech-group { margin-top: 10px; }
       .tech-group.hidden { display: none; }
       .tech-grouplbl { font-size: 10px; color: var(--muted); letter-spacing: 2px; font-weight: 700; margin: 0 0 5px; padding-left: 6px; border-left: 3px solid var(--tech); }
-      #grp-quick .tech-grouplbl { border-left-color: var(--lavender); }
-      #grp-full .tech-grouplbl { border-left-color: var(--gold); }
+      .tech-grouplbl.core-lbl { border-left-color: #2faa5b; } /* CORE groups are green */
+      .system.techchip { display: inline-flex; align-items: center; gap: 5px; }
+      .system.techchip .acticon { color: var(--tech); flex: none; }
+      #grp-protocols .system.techchip .acticon { color: #9fd2ff; }
       /* CORE tab */
       .weapon.corew { border-left-color: #2faa5b; }
       .weapon.corew .acticon { color: #5ad17a; }
       .core-effect { white-space: normal; line-height: 1.45; }
+
+      /* weapon mod box — thin strip under the weapon name */
+      .wmod { font-family: var(--mono); font-size: 10px; letter-spacing: 0.5px; color: var(--muted); border: 1px dashed var(--line); border-radius: 3px; padding: 2px 7px; margin: 5px 0 4px; text-transform: uppercase; }
+      .wmod.has-mod { color: #cdb6f0; border-style: solid; border-color: #4a2a8f; cursor: help; }
+      .wmod.has-mod:hover { color: #fff; border-color: var(--lavender); }
+
+      /* range sliders — navy + a touch duller, not the bright Windows blue */
+      input[type="range"] { accent-color: #21407a; height: 4px; }
 
       /* ---- remote-roll side popup (other players' dice) ---- */
       #remote-popup {
@@ -283,6 +293,11 @@
       /* crit FIRE drops the "(CRIT)" text but keeps a gold tell */
       #firebtn.crit { border-color: var(--gold); color: #fff; box-shadow: 0 0 18px rgba(255,180,84,0.9); }
       @keyframes firepulse { from { box-shadow: 0 0 8px rgba(255,26,26,0.5); } to { box-shadow: 0 0 22px rgba(255,26,26,0.95); } }
+      /* Combat Drill Overclock — molten, sits next to FIRE at the same height */
+      #overclockbtn { display: none; background: linear-gradient(180deg, #ff9a2e 0%, #e0380c 55%, #7a1500 100%); color: #fff; border: 2px solid #ffce8a; border-radius: 8px; font-family: var(--font); font-weight: 700; font-size: 13px; letter-spacing: 2px; padding: 10px 14px; cursor: pointer; text-shadow: 0 0 6px #ffae42, 0 1px 0 #000; box-shadow: 0 0 16px rgba(255,120,20,0.85), inset 0 0 8px rgba(255,205,130,0.55); animation: moltenpulse 0.8s ease-in-out infinite alternate; }
+      #overclockbtn.show { display: inline-block; }
+      #overclockbtn:hover { filter: brightness(1.12); }
+      @keyframes moltenpulse { from { box-shadow: 0 0 10px rgba(255,120,20,0.6), inset 0 0 6px rgba(255,205,130,0.4); } to { box-shadow: 0 0 24px rgba(255,80,10,0.95), inset 0 0 13px rgba(255,225,160,0.75); } }
       #heatapply { display: none; background: #7a2d00; color: #ffb454; border: 1px solid var(--heatred); border-radius: 8px; font-family: var(--mono); font-weight: 700; font-size: 11px; padding: 8px 10px; cursor: pointer; }
       #heatapply.show { display: inline-block; }
       #resultclear { background: rgba(10,12,16,0.85); border: 1px solid var(--line); color: var(--muted); border-radius: 6px; width: 24px; height: 24px; cursor: pointer; font-size: 12px; line-height: 1; padding: 0; }
@@ -339,6 +354,12 @@
       .gm-tab.sel { color: #bfeaff; }
       .gm-holo { position: absolute; top: 0; height: 100%; border: 1px solid rgba(126, 230, 255, 0.55); background: rgba(63, 167, 214, 0.14); border-radius: 4px; box-shadow: 0 0 10px rgba(126, 230, 255, 0.25), inset 0 0 12px rgba(126, 230, 255, 0.12); transition: left 0.35s cubic-bezier(0.4, 0, 0.2, 1), width 0.35s cubic-bezier(0.4, 0, 0.2, 1); pointer-events: none; }
       .npc-form { background: var(--panel); border: 1px solid var(--tech); padding: 10px; margin-bottom: 10px; }
+      /* inputs fill their cell and the flex cells may shrink — fixes boxes that
+         used to spill past the blue border */
+      .npc-form input, .npc-form textarea { width: 100%; }
+      .npc-form .row > div { min-width: 0; }
+      .npc-form .nf-namerow { margin-top: 0; }
+      .npc-form label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .npc-card { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--heatred); margin-bottom: 8px; padding: 8px 10px; }
       .npc-card .nc-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
       .npc-card .nc-name { font-weight: 700; font-size: 14px; letter-spacing: 1px; text-transform: uppercase; overflow-wrap: anywhere; }
@@ -361,7 +382,11 @@
       .lc-bar { flex: 1; height: 10px; background: #262b33; border: 1px solid #10131a; position: relative; overflow: hidden; }
       .lc-bar .fill { position: absolute; inset: 0; right: auto; background: var(--hpblue); }
       .lc-bar.heat .fill { background: var(--heatred); }
-      .lc-barrow .v { width: 58px; font-family: var(--mono); font-size: 10px; }
+      .lc-barrow .v { width: 50px; font-family: var(--mono); font-size: 10px; flex: none; }
+      /* left-hand max-value stepper on HP / HEAT rows */
+      .maxstep { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+      .maxstep b { min-width: 16px; text-align: center; font-family: var(--mono); font-size: 10px; color: var(--text); }
+      .npc-card .lc-barrow .k { width: 34px; flex: none; }
       .lc-pips { display: flex; gap: 12px; padding: 0 10px 8px; font-family: var(--mono); font-size: 10px; color: var(--muted); flex-wrap: wrap; }
       .lc-pips span { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
       .lc-pips b { color: var(--text); }
@@ -385,7 +410,7 @@
       <header>
         <img id="hdr-icon" src="./icons/tool.svg" alt="mode" title="Toggle MISSION//CONTROL (GM view)" onerror="this.style.display='none'" />
         <h1 id="hdr-title">LANCER<span class="slash">//</span>UPLINK</h1>
-        <span class="ver">v2.8.3</span>
+        <span class="ver">v2.8.4</span>
         <span id="conn-dot" title="Owlbear link status"></span>
       </header>
       <nav class="tabs" id="tabnav">
@@ -457,6 +482,10 @@
                 <div class="tech-grouplbl">FULL TECH</div>
                 <div class="sys-wrap" id="fulltech"></div>
               </div>
+              <div class="tech-group" id="grp-protocols">
+                <div class="tech-grouplbl">PROTOCOLS</div>
+                <div class="sys-wrap" id="protocols"></div>
+              </div>
             </div>
           </details>
 
@@ -502,7 +531,8 @@
               <div class="sub" id="result-sub"></div>
               <div class="crit" id="result-crit"></div>
             </div>
-            <button id="firebtn" title="Roll this weapon's damage">⬢ FIRE</button>
+            <button id="firebtn" title="Roll this weapon's damage (standard Overkill)">⬢ FIRE</button>
+            <button id="overclockbtn" title="Combat Drill Overclock — exploding Overkill dice">⬢ OVERCLOCK</button>
             <button id="heatapply" title="Apply this Overkill heat to your mech">+0 HEAT</button>
             <button id="resultclear" title="Clear roll data">✕</button>
           </div>
@@ -587,7 +617,7 @@
             <div class="muted" id="grid-readout" style="font-family:var(--mono)">Waiting for a scene…</div>
             <label style="margin-top:10px">Grid type</label>
             <select id="grid-mode">
-              <option value="auto">AUTO (match the room)</option>
+              <option value="auto">AUTO</option>
               <option value="hexf">HEX — FLAT TOP</option>
               <option value="hexp">HEX — POINT TOP</option>
               <option value="square">SQUARE</option>
@@ -648,21 +678,18 @@
 
           <div id="npc-form" class="npc-form hidden">
             <input type="hidden" id="nf-id" />
-            <div class="row">
-              <div style="flex:2"><label>Name</label><input id="nf-name" type="text" placeholder="Ultra Berserker" /></div>
-              <div><label>Tier</label><input id="nf-tier" type="text" placeholder="T1" /></div>
-            </div>
+            <div class="nf-namerow"><label>Name</label><input id="nf-name" type="text" placeholder="Ultra Berserker" /></div>
             <div class="row" style="margin-top:6px">
               <div><label>HP</label><input id="nf-hp" type="number" value="10" /></div>
-              <div><label>Heat cap</label><input id="nf-heat" type="number" value="6" /></div>
-              <div><label>Evasion</label><input id="nf-eva" type="number" value="8" /></div>
+              <div><label>Heat&nbsp;Capacity</label><input id="nf-heat" type="number" value="6" /></div>
+              <div><label>Speed</label><input id="nf-spd" type="number" value="4" /></div>
               <div><label>Sensors</label><input id="nf-sens" type="number" value="10" /></div>
             </div>
             <div class="row" style="margin-top:6px">
-              <div><label>E-Def</label><input id="nf-edef" type="number" value="8" /></div>
-              <div><label>Speed</label><input id="nf-spd" type="number" value="4" /></div>
               <div><label>Armor</label><input id="nf-arm" type="number" value="0" /></div>
               <div><label>Save</label><input id="nf-save" type="number" value="10" /></div>
+              <div><label>Evasion</label><input id="nf-eva" type="number" value="8" /></div>
+              <div><label>E-Defense</label><input id="nf-edef" type="number" value="8" /></div>
             </div>
             <label>Weapons / abilities / notes</label>
             <textarea id="nf-notes" rows="3" style="width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--text); border-radius:4px; padding:6px 8px; font-family:var(--mono); font-size:12px"></textarea>

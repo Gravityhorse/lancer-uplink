@@ -33,6 +33,7 @@ const TOOL = `${ID}/tool`;
 const iconUrl = (name) => new URL(`./icons/${name}`, import.meta.url).href;
 
 export const MODES = {
+  move: `${ID}/mode-move`,
   blast: `${ID}/mode-blast`,
   cone: `${ID}/mode-cone`,
   line: `${ID}/mode-line`,
@@ -434,7 +435,17 @@ export async function registerTool() {
   await OBR.tool.create({
     id: TOOL,
     icons: [{ icon: iconUrl("tool.svg"), label: "LANCER Templates" }],
-    defaultMode: MODES.blast,
+    defaultMode: MODES.move, // open in the safe Move mode, not armed to place
+  });
+
+  // MOVE: a passthrough mode that hands map interaction back to Owlbear — an
+  // empty preventDrag filter always returns true, so dragging uses the default
+  // operation "which mimics the Move tool" (pan + drag tokens); clicks select.
+  await OBR.tool.createMode({
+    id: MODES.move,
+    icons: [{ icon: iconUrl("select.svg"), label: "Move", filter: { activeTools: [TOOL] } }],
+    cursors: [{ cursor: "move" }],
+    preventDrag: {},
   });
 
   await OBR.tool.createMode(blastMode(iconUrl("blast.svg")));
