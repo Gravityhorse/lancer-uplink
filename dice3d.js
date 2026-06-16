@@ -79,30 +79,54 @@ function makeD10(r) {
   return g;
 }
 
-// Merge triangles into logical faces keyed by rounded normal.
-function extractFaces(geometry) {
+// Merge triangles into exactly `want` logical faces. The old rounded-normal key
+// was unreliable — numerical noise split a d12's 12 pentagons into 17 keys (so
+// the die showed 13–17 and doubled numbers) and gave the d10 12 groups. Instead
+// we cluster triangles by normal DIRECTION, then merge the nearest clusters down
+// to the die's true face count. Centroids are area-weighted, so each number
+// sits at the visual centre of its face.
+function extractFaces(geometry, want) {
   const geo = geometry.index ? geometry.toNonIndexed() : geometry;
   const p = geo.getAttribute("position");
-  const groups = new Map();
   const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
-  const ab = new THREE.Vector3(), cb = new THREE.Vector3(), n = new THREE.Vector3();
+  const ab = new THREE.Vector3(), cb = new THREE.Vector3(), nv = new THREE.Vector3();
+  const TH = Math.cos((15 * Math.PI) / 180); // coplanar triangles cluster together
+  let clusters = []; // { dir, dsum, cent (area-weighted), area }
   for (let i = 0; i < p.count; i += 3) {
     vA.fromBufferAttribute(p, i);
     vB.fromBufferAttribute(p, i + 1);
     vC.fromBufferAttribute(p, i + 2);
     cb.subVectors(vC, vB); ab.subVectors(vA, vB);
-    n.crossVectors(cb, ab).normalize();
-    const key = `${n.x.toFixed(1)},${n.y.toFixed(1)},${n.z.toFixed(1)}`;
-    let grp = groups.get(key);
-    if (!grp) { grp = { normal: n.clone(), pts: [] }; groups.set(key, grp); }
-    grp.pts.push(vA.clone(), vB.clone(), vC.clone());
+    nv.crossVectors(cb, ab);
+    const area = nv.length() / 2 || 1e-6;
+    const normal = nv.clone().normalize();
+    const centroid = vA.clone().add(vB).add(vC).multiplyScalar(1 / 3);
+    let best = null, bd = TH;
+    for (const c of clusters) { const d = c.dir.dot(normal); if (d > bd) { bd = d; best = c; } }
+    if (best) {
+      best.area += area;
+      best.cent.add(centroid.multiplyScalar(area));
+      best.dsum.add(normal);
+      best.dir.copy(best.dsum).normalize();
+    } else {
+      clusters.push({ dir: normal.clone(), dsum: normal.clone(), cent: centroid.multiplyScalar(area), area });
+    }
+  }
+  // merge the two most-aligned clusters until exactly `want` faces remain
+  while (want && clusters.length > want) {
+    let bi = 0, bj = 1, bd = -2;
+    for (let i = 0; i < clusters.length; i++)
+      for (let j = i + 1; j < clusters.length; j++) {
+        const d = clusters[i].dir.dot(clusters[j].dir);
+        if (d > bd) { bd = d; bi = i; bj = j; }
+      }
+    const a = clusters[bi], b = clusters[bj];
+    a.area += b.area; a.cent.add(b.cent); a.dsum.add(b.dsum); a.dir.copy(a.dsum).normalize();
+    clusters.splice(bj, 1);
   }
   const out = [];
-  for (const grp of groups.values()) {
-    const c = new THREE.Vector3();
-    grp.pts.forEach((v) => c.add(v));
-    c.multiplyScalar(1 / grp.pts.length);
-    out.push({ dir: grp.normal.clone().normalize(), centroid: c });
+  for (const c of clusters) {
+    out.push({ dir: c.dir.clone().normalize(), centroid: c.cent.clone().multiplyScalar(1 / c.area) });
   }
   return out;
 }
@@ -589,7 +613,7 @@ export function createDiceTray(container, opts = {}) {
   function buildDie(type, role) {
     const def = DIE[type];
     const geometry = def.geom();
-    const faces = extractFaces(geometry);
+    const faces = extractFaces(geometry, def.faces);
     const values = faces.map((_, i) => i + 1);
     if (type === "d10") { for (let i = 0; i < values.length; i++) values[i] = (i + 1) % 10; }
 
@@ -690,6 +714,40 @@ export function createDiceTray(container, opts = {}) {
         d[i] = last * 3;
       }
     } catch (_) { audioCtx = null; }
+    ensureMusic();
+  }
+
+  // ---- OPTIONAL roll music (HORUS d20) ----------------------------------------
+  // Copyright means we can't ship a song. Drop your own loop at  audio/horus.mp3
+  // in the repo and a HORUS d20 will play a random slice of it while it tumbles,
+  // cutting out the instant it settles. (Caramelldansen is the intended vibe.)
+  let musicBuf = null, musicTried = false, musicSrc = null;
+  async function ensureMusic() {
+    if (musicTried || !audioCtx) return;
+    musicTried = true;
+    try {
+      const res = await fetch(new URL("./audio/horus.mp3", import.meta.url).href);
+      if (!res.ok) return;
+      musicBuf = await audioCtx.decodeAudioData(await res.arrayBuffer());
+    } catch (_) { musicBuf = null; }
+  }
+  function playRollMusic() {
+    if (!musicBuf || !audioCtx) return;
+    if (opts.sound && !opts.sound()) return; // respect the mute toggle
+    stopRollMusic();
+    try {
+      musicSrc = audioCtx.createBufferSource();
+      musicSrc.buffer = musicBuf;
+      const g = audioCtx.createGain();
+      g.gain.value = 0.55;
+      musicSrc.connect(g).connect(audioCtx.destination);
+      // jump into the middle (the "chorus" region), not the intro
+      const off = musicBuf.duration * (0.2 + Math.random() * 0.5);
+      musicSrc.start(0, off);
+    } catch (_) { musicSrc = null; }
+  }
+  function stopRollMusic() {
+    if (musicSrc) { try { musicSrc.stop(); } catch (_) {} musicSrc = null; }
   }
   function playImpact(v) {
     if (!audioCtx) return;
@@ -837,6 +895,8 @@ export function createDiceTray(container, opts = {}) {
       rolling = true;
       ensureAudio();
       try { if (audioCtx?.state === "suspended") audioCtx.resume(); } catch (_) {}
+      // HORUS d20 in the throw? play the (user-supplied) roll music until settle
+      if (list.some((d) => d.type === "d20" && d.schemeKey === "horus")) playRollMusic();
       // camera order: dice were added at HOME view — the throw brings a
       // SLIGHT zoom, and the result zoom lands after settle
       stageView();
@@ -870,6 +930,7 @@ export function createDiceTray(container, opts = {}) {
           snappers.forEach((d) => planSnap(d, d.forceTo));
           const finish = () => {
             rolling = false;
+            stopRollMusic(); // the number's up — cut the music
             const results = list.map((d) => ({
               type: d.type, role: d.role,
               value: d.forceTo != null ? d.forceTo : readDie(d),

@@ -12,7 +12,7 @@
 //
 // Lancer rules note: GRIT applies to attack rolls only, never to damage.
 
-import { OBR, CH_ROLL3D, CH_STATUS, META, buildShape } from "./sdk.js";
+import { OBR, CH_ROLL3D, CH_STATUS, META, buildShape, buildLabel } from "./sdk.js";
 import * as hex from "./hex.js";
 import * as tool from "./tool.js";
 import {
@@ -74,6 +74,7 @@ function saveState() {
         uiScale,
         sound: sndOn,
         macro: $("macro-toggle")?.checked || false,
+        tokenBars: tokenBarsOn,
         bond,
       }));
     } catch (_) { /* storage may be unavailable in some embeds */ }
@@ -289,6 +290,110 @@ async function pingToken(tokenId) {
   }
 }
 
+// ========================================================== TOKEN STATUS BARS ==
+// House-rule overlay: small live HP (blue) + Heat (orange) bars above every
+// bonded lancer token — mine plus everyone's via squad broadcasts. Local items
+// only (each client draws what it knows), attached to the token so they follow
+// it. Selecting a token reveals its exact X/Y values. Built to extend later
+// (conditions, more stats) — add another `bar(...)` / label row per token.
+let tokenBarsOn = false;
+let selectedTokens = new Set();
+const TBAR = "tokenbar";
+
+// [{ id, hp, hpMax, heat, heatMax, size }] for every bonded token we know about
+function tokenBarTargets() {
+  const out = [];
+  const seen = new Set();
+  const add = (id, hp, hpMax, heat, heatMax, size) => {
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    out.push({ id, hp: hp ?? 0, hpMax: Math.max(1, hpMax ?? 1), heat: heat ?? 0, heatMax: Math.max(1, heatMax ?? 1), size: size || 1 });
+  };
+  if (bond?.id && live && currentMech) {
+    const s = currentMech.stats;
+    add(bond.id, live.hp, s.hpMax, live.heat, s.heatMax, s.size);
+  }
+  for (const e of squad.values()) {
+    if (e.bondId) add(e.bondId, e.live?.hp, e.stats?.hpMax, e.live?.heat, e.stats?.heatMax, e.stats?.size);
+  }
+  return out;
+}
+
+let tokenBarsBusy = false, tokenBarsPending = false;
+async function renderTokenBars() {
+  if (!obrReady) return;
+  if (tokenBarsBusy) { tokenBarsPending = true; return; } // serialize rebuilds
+  tokenBarsBusy = true;
+  try {
+    const old = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === TBAR);
+    if (old.length) await OBR.scene.local.deleteItems(old.map((i) => i.id));
+    if (!tokenBarsOn) return;
+    const targets = tokenBarTargets();
+    if (!targets.length) return;
+    let tokens = [];
+    try { tokens = await OBR.scene.items.getItems(targets.map((t) => t.id)); } catch (_) {}
+    const byId = new Map(tokens.map((t) => [t.id, t]));
+    const cell = hex.grid.dpi || 150;
+    const meta = { [META]: { kind: TBAR } };
+    const items = [];
+    for (const t of targets) {
+      const tok = byId.get(t.id);
+      if (!tok || !tok.position) continue;
+      const foot = cell * (t.size || 1);           // token footprint ≈ size cells
+      const W = foot * 0.86, H = Math.max(5, cell * 0.085), gap = cell * 0.028;
+      const cx = tok.position.x, left = cx - W / 2;
+      const hpY = tok.position.y - foot * 0.5 - cell * 0.16 - H; // sit just above
+      const heatY = hpY + H + gap;
+      const sw = Math.max(1, cell * 0.006);
+      const attach = (it) => { it.attachedTo = t.id; it.disableAttachmentBehavior = ["ROTATION", "SCALE", "COPY"]; items.push(it); };
+      const bar = (y, pct, color) => {
+        // dark-grey track with a light-grey border (shows through where depleted)
+        attach(buildShape().shapeType("RECTANGLE").position({ x: cx, y }).width(W).height(H)
+          .fillColor("#1b1e25").fillOpacity(0.82).strokeColor("#aab3c0").strokeOpacity(0.75).strokeWidth(sw)
+          .layer("PROP").locked(true).disableHit(true).metadata(meta).build());
+        const fw = Math.max(0, Math.min(1, pct)) * W;   // percentage fill, left-anchored
+        if (fw > 0.5) attach(buildShape().shapeType("RECTANGLE").position({ x: left + fw / 2, y }).width(fw).height(H)
+          .fillColor(color).fillOpacity(0.95).strokeOpacity(0).strokeWidth(0)
+          .layer("PROP").locked(true).disableHit(true).metadata(meta).build());
+      };
+      bar(hpY, t.hp / t.hpMax, "#2196f3");   // blue HP (depletes)
+      bar(heatY, t.heat / t.heatMax, "#ff7a1a"); // orange Heat (builds)
+      // exact values only while the token is selected — keeps it subtle
+      if (selectedTokens.has(t.id)) {
+        const num = (y, txt) => {
+          let b = buildLabel().plainText(txt).position({ x: cx, y });
+          const opt = (fn, ...a) => { try { if (typeof b[fn] === "function") b = b[fn](...a); } catch (_) {} };
+          opt("fontSize", Math.max(9, cell * 0.072));
+          opt("pointerHeight", 0); opt("pointerWidth", 0);
+          opt("backgroundOpacity", 0); opt("fillOpacity", 0);
+          opt("layer", "TEXT"); opt("locked", true); opt("disableHit", true);
+          opt("metadata", meta);
+          const it = b.build();
+          it.attachedTo = t.id;
+          items.push(it);
+        };
+        num(hpY, `${t.hp}/${t.hpMax}`);
+        num(heatY, `${t.heat}/${t.heatMax}`);
+      }
+    }
+    if (items.length) await OBR.scene.local.addItems(items);
+  } catch (e) {
+    console.warn("[LANCER//UPLINK] token bars failed", e);
+  } finally {
+    tokenBarsBusy = false;
+    if (tokenBarsPending) { tokenBarsPending = false; renderTokenBars(); }
+  }
+}
+
+function setTokenBars(on) {
+  tokenBarsOn = !!on;
+  const cb = $("tokenbars-toggle");
+  if (cb) cb.checked = tokenBarsOn;
+  renderTokenBars();
+  saveState();
+}
+$("tokenbars-toggle")?.addEventListener("change", () => setTokenBars($("tokenbars-toggle").checked));
+
 // ====================================================== FIELD TELEMETRY (NPCs) ==
 // GM-side NPC roster — stored ONLY in this browser's localStorage, never
 // broadcast, so players can't see it even by accident.
@@ -350,7 +455,7 @@ $("nf-save-btn")?.addEventListener("click", () => {
     name: $("nf-name").value.trim() || "NPC",
     tier: existing?.tier || "", // tier kept for imports; no longer a form field
     hpMax: Math.max(1, Math.min(60, num("nf-hp", 10))),
-    heatMax: Math.max(0, num("nf-heat", 6)),
+    heatMax: Math.max(0, Math.min(60, num("nf-heat", 6))),
     evasion: num("nf-eva", 8),
     edef: num("nf-edef", 8),
     speed: num("nf-spd", 4),
@@ -520,8 +625,17 @@ function renderNpcs() {
     card.querySelectorAll(".pp[data-max]").forEach((b) => {
       b.addEventListener("click", () => {
         const k = b.dataset.max, d = Number(b.dataset.d);
-        if (k === "hp") { n.hpMax = Math.max(1, Math.min(60, n.hpMax + d)); if (n.hp > n.hpMax) n.hp = n.hpMax; }
-        if (k === "heat") { n.heatMax = Math.max(0, n.heatMax + d); if (n.heat > n.heatMax) n.heat = n.heatMax; }
+        if (k === "hp") {
+          const before = n.hpMax;
+          n.hpMax = Math.max(1, Math.min(60, n.hpMax + d));
+          const delta = n.hpMax - before;
+          // raising Max HP fills the new bars (current follows); lowering clamps
+          n.hp = Math.min(n.hpMax, Math.max(0, n.hp + (delta > 0 ? delta : 0)));
+        }
+        if (k === "heat") {
+          n.heatMax = Math.max(0, Math.min(60, n.heatMax + d)); // cap 60
+          if (n.heat > n.heatMax) n.heat = n.heatMax; // Heat Capacity stays empty
+        }
         saveNpcs();
         renderNpcs();
       });
@@ -681,6 +795,7 @@ function onLiveChanged() {
   renderStatGrid(currentMech.stats);
   saveState();
   broadcastStatus();
+  if (tokenBarsOn) renderTokenBars();
 }
 
 function renderMech(idx) {
@@ -751,6 +866,7 @@ $("btn-bond")?.addEventListener("click", async () => {
     bond = { id: sel[0], name: items[0]?.name || items[0]?.text?.plainText || "token" };
     updateBondUI();
     saveState();
+    if (tokenBarsOn) renderTokenBars();
     setStatus(`Bonded to "${bond.name}".`, "status-ok");
   } catch (e) {
     setStatus("Could not read the selection — open a scene first.", "status-err");
@@ -761,6 +877,7 @@ $("btn-unbond")?.addEventListener("click", async () => {
   bond = null;
   updateBondUI();
   saveState();
+  if (tokenBarsOn) renderTokenBars();
   for (const kind of Object.keys(activeFields)) await removeField(kind);
 });
 
@@ -957,7 +1074,7 @@ function renderCC(s) {
           if (live.hp === 0) structureDamage();
         }
       } else if (k === "heat" && d > 0) {
-        applyHeat(1); // cascades into Stress past Heat Capacity
+        applyHeat(1, false); // manual: take Stress and reset heat to 0 (no carry)
       } else {
         live[k] = Math.max(0, Math.min(maxes[k], live[k] + d));
       }
@@ -1009,7 +1126,9 @@ function structureDamage() {
 // Apply a Heat change. Positive heat that exceeds Heat Capacity cascades into
 // Stress — and keeps going if the overflow is large enough to blow through
 // several stress levels at once — carrying the remainder into the next level.
-function applyHeat(amount) {
+// carry=true (Overkill etc.) carries the overflow into the next stress level;
+// carry=false (manual + button) just takes the stress and resets heat to 0.
+function applyHeat(amount, carry = true) {
   if (!currentMech || !live) return;
   const s = currentMech.stats;
   if (amount < 0) { live.heat = Math.max(0, live.heat + amount); return; }
@@ -1017,7 +1136,7 @@ function applyHeat(amount) {
   let guard = 0;
   while (live.heat > s.heatMax && guard++ < 50) {
     live.stress = Math.max(0, live.stress - 1);
-    live.heat -= s.heatMax; // carry the overflow into the next stress level
+    live.heat = carry ? live.heat - s.heatMax : 0; // carry the overflow, or reset
     if (live.stress > 0) {
       logRoll({ kind: "sys", title: "OVERHEAT", detail: `Reactor stress ${live.stress}/${s.stressMax} — heat carries to ${live.heat}/${s.heatMax}.` });
       if (macroOn()) rollOverheatTable();
@@ -1372,6 +1491,63 @@ function renderCore(m) {
   };
   chipGroup("CORE BONUSES", bonuses, "None picked up yet.");
   if (traits.length) chipGroup("FRAME TRAITS", traits, "None.");
+  renderFrameEgg(m, wrap);
+}
+
+// ---- frame easter eggs (the fun part) -------------------------------------------
+// Big Stupid Buttons for the dramatic frames. These do nothing mechanical —
+// Uplink doesn't roll for blowing up your own mech — they're pure theatre.
+let railCharge = 0;
+function renderFrameEgg(m, wrap) {
+  const fid = `${m.frame?.id || ""} ${m.frame?.name || ""}`.toLowerCase();
+  if (/manticore/.test(fid)) {
+    const btn = document.createElement("button");
+    btn.id = "castigate-btn";
+    btn.className = "egg-btn manticore";
+    btn.textContent = "CASTIGATE THE ENEMIES OF THE GODHEAD";
+    btn.classList.toggle("armed", document.body.classList.contains("godhead"));
+    btn.addEventListener("click", toggleGodhead);
+    wrap.appendChild(btn);
+  }
+  if (/barbarossa/.test(fid)) wrap.appendChild(buildApocalypseRail());
+}
+
+// MANTICORE — flash the Eye of Horus and charge every panel with electric glow.
+function toggleGodhead() {
+  const on = !document.body.classList.contains("godhead");
+  document.body.classList.toggle("godhead", on);
+  $("castigate-btn")?.classList.toggle("armed", on);
+  if (on) {
+    const eye = $("godhead-eye");
+    if (eye) { eye.classList.remove("flash"); void eye.offsetWidth; eye.classList.add("flash"); }
+  }
+}
+
+// BARBAROSSA — a charge counter + a button that screams a rail beam across the UI.
+function buildApocalypseRail() {
+  const box = document.createElement("div");
+  box.className = "rail-box";
+  const render = () => {
+    box.innerHTML = `
+      <div class="rail-title">⚡ APOCALYPSE RAIL</div>
+      <div class="rail-charge">CHARGE <b>${"◆".repeat(railCharge)}${"◇".repeat(4 - railCharge)}</b></div>
+      <div class="row" style="margin-top:6px">
+        <button class="btn ghost small" data-act="charge">CHARGE +</button>
+        <button class="btn ghost small" data-act="discharge">VENT −</button>
+      </div>
+      <button class="egg-btn rail-fire${railCharge >= 4 ? " ready" : ""}" data-act="fire">FIRE APOCALYPSE RAIL</button>`;
+    box.querySelector('[data-act="charge"]').onclick = () => { railCharge = Math.min(4, railCharge + 1); render(); };
+    box.querySelector('[data-act="discharge"]').onclick = () => { railCharge = Math.max(0, railCharge - 1); render(); };
+    box.querySelector('[data-act="fire"]').onclick = () => fireRail();
+  };
+  render();
+  return box;
+}
+function fireRail() {
+  const beam = $("rail-beam");
+  if (beam) { beam.classList.remove("flash"); void beam.offsetWidth; beam.classList.add("flash"); }
+  railCharge = 0;
+  if (currentMech) renderCore(currentMech); // reset the charge display
 }
 
 // ---- systems + talents (hover tooltips) -------------------------------------------
@@ -2505,11 +2681,30 @@ async function start() {
       if (d.type === "status" && d.who) {
         squad.set(d.who, d);
         if (gmMode) renderGM();
+        if (tokenBarsOn) renderTokenBars(); // a teammate's HP/Heat changed
       }
     });
   } catch (e) {
     console.warn("[LANCER//UPLINK] broadcast channels unavailable", e);
   }
+
+  // Token status bars: reveal numbers on selection; redraw if a tracked token
+  // moves (attachment follows it, but a re-draw keeps things crisp).
+  try {
+    OBR.player.onChange((p) => {
+      selectedTokens = new Set(p.selection || []);
+      if (tokenBarsOn) renderTokenBars();
+    });
+  } catch (_) {}
+  try {
+    let barTimer = 0;
+    OBR.scene.items.onChange(() => {
+      if (!tokenBarsOn) return;
+      clearTimeout(barTimer);
+      barTimer = setTimeout(renderTokenBars, 250);
+    });
+  } catch (_) {}
+  if (tokenBarsOn) renderTokenBars();
 
   broadcastStatus();
 }
@@ -2530,6 +2725,7 @@ async function start() {
   refreshGridReadout();
   if (st.uiScale) { uiScale = st.uiScale; applyUiScale(); }
   if ($("macro-toggle")) $("macro-toggle").checked = !!st.macro;
+  if (st.tokenBars) { tokenBarsOn = true; if ($("tokenbars-toggle")) $("tokenbars-toggle").checked = true; }
   if (st.bond && st.bond.id) bond = st.bond;
   updateBondUI();
   if (st.live) restoreLive = st.live;
