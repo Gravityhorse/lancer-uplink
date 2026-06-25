@@ -60,11 +60,26 @@ version in descending order (newest first).
 
 ## Shipped in 2.8.9 ✓
 
-- ✓ **Token bars rebuilt diff-based**: each token's bar elements now carry a
-  deterministic id, so a refresh UPDATES them in place and only deletes what's
-  truly gone — no full wipe. This kills the teammate "shows for ~5s then vanishes"
-  bug and the spam-click "cells randomly brighten/dull" glitch (overlapping
-  duplicate fills under rapid re-renders), and drops `attachedTo` entirely
+- ✓ **Root-cause render fix (invisible Pen / Paint / token bars)**: Owlbear keeps
+  an item's cached path mesh when you `updateItems` it — only its *position*
+  re-renders, not its `.commands` geometry — so anything that grew/changed a path
+  via update went invisible-but-present (you could still erase it). Everything now
+  follows the Move/Sensors/Range pattern of `addItems` only. The **Pen** is built
+  from many short round-jointed segments; **token bars** rebuild a token's set
+  (delete + add) only when that token's data actually changes, gated by a
+  per-token signature (no flicker, no brightness stacking, no vanish)
+- ✓ **Remote rolls moved to a separate on-screen popover** (`roll-popup.html`):
+  teammates' dice now replay in their own Owlbear popover anchored to the right of
+  the *screen*, just left of the toolbar — never covering the panel. Fed over a
+  same-client LOCAL broadcast with a ready/closed handshake. House Rules toggle
+  "SHOW OTHER PLAYERS' DICE ROLLS" (on by default)
+- ✓ **OVERCHARGE is now a House Rules opt-in** (off by default); the OC hex + CLEAR
+  OC button only appear when enabled. Heat now reads exactly like Overkill — the
+  number in an orange-outlined card with a tappable **+N HEAT** badge — and the
+  first overcharge (flat 1 Heat) resolves instantly with no confusing empty roll
+- ✓ **Eraser is click-and-drag**; the Pen icon turns 90° CCW; the ACC/DIF/OC hexes
+  regained the subtle grey outline that matches the dice; CLEAR OC and TEMPLATE
+  COLOR are plain grey buttons; the UNDO LAST ↶ glyph is gone
 - ✓ **OVERCHARGE reworked to prime-to-roll**: the orange hex now PRIMES a molten
   die that you fire with ROLL (no more auto-roll, no top "OVERCHARGE #1" banner).
   Result reads cleanly — the value in an orange outline with a bold **+N HEAT**

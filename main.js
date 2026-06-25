@@ -12,7 +12,7 @@
 //
 // Lancer rules note: GRIT applies to attack rolls only, never to damage.
 
-import { OBR, CH_ROLL3D, CH_STATUS, META, buildShape, buildLabel, buildPath, Command } from "./sdk.js";
+import { OBR, CH_ROLL3D, CH_STATUS, META, buildShape, buildLabel, buildPath, Command, CH_RP, CH_RP_READY, CH_RP_CLOSED, RP_POPOVER, RP_POPOVER_URL } from "./sdk.js";
 import * as hex from "./hex.js";
 import * as tool from "./tool.js";
 import {
@@ -75,6 +75,8 @@ function saveState() {
         sound: sndOn,
         macro: $("macro-toggle")?.checked || false,
         tokenBars: tokenBarsOn,
+        overcharge: $("overcharge-toggle")?.checked || false,
+        showRemoteRolls: $("remoteroll-toggle") ? $("remoteroll-toggle").checked : true,
         bond,
       }));
     } catch (_) { /* storage may be unavailable in some embeds */ }
@@ -378,42 +380,54 @@ function tbarQuads(left, y, W, H, cells, filled) {
   for (let i = 0; i < cells; i++) { track.push(...quad(i)); if (i < filled) fill.push(...quad(i)); }
   return { track, fill };
 }
-function buildTbarItem(id, spec) {
-  const meta = { [META]: { kind: TBAR } };
-  let it;
+function buildTbarItem(spec, tokenId) {
+  const meta = { [META]: { kind: TBAR, token: tokenId } };
   if (spec.kind === "label") {
     let b = buildLabel().plainText(spec.text).position({ x: spec.x, y: spec.y });
     const opt = (fn, ...a) => { try { if (typeof b[fn] === "function") b = b[fn](...a); } catch (_) {} };
     opt("fontSize", spec.fontSize); opt("pointerHeight", 0); opt("pointerWidth", 0);
     opt("backgroundOpacity", 0); opt("layer", "TEXT"); opt("locked", true); opt("disableHit", true); opt("metadata", meta);
-    it = b.build();
-  } else {
-    it = buildPath().position({ x: 0, y: 0 }).commands(spec.commands)
-      .fillColor(spec.fill).fillOpacity(spec.fillOp).strokeColor("#000000").strokeOpacity(spec.strokeOp).strokeWidth(spec.strokeW)
-      .fillRule("evenodd").layer("PROP").locked(true).disableHit(true).metadata(meta).build();
+    return b.build();
   }
-  it.id = id; // deterministic id — the diff updates this item in place, never dupes it
-  return it;
-}
-function applyTbarSpec(it, spec) {
-  if (!spec) return;
-  if (spec.kind === "label") {
-    if (it.text) it.text.plainText = spec.text;
-    it.position = { x: spec.x, y: spec.y };
-  } else {
-    it.commands = spec.commands;
-    if (it.style) {
-      it.style.fillColor = spec.fill; it.style.fillOpacity = spec.fillOp;
-      it.style.strokeOpacity = spec.strokeOp; it.style.strokeWidth = spec.strokeW;
-    }
-  }
+  return buildPath().position({ x: 0, y: 0 }).commands(spec.commands)
+    .fillColor(spec.fill).fillOpacity(spec.fillOp).strokeColor("#000000").strokeOpacity(spec.strokeOp).strokeWidth(spec.strokeW)
+    .fillRule("evenodd").layer("PROP").locked(true).disableHit(true).metadata(meta).build();
 }
 
+// Build the full set of bar items for one token (track + lit fill for HP and
+// Heat, plus value labels while selected). Each item is tagged metadata.token.
+function buildBarsFor(t, tok, cell) {
+  const foot = cell * (t.size || 1);
+  const W = foot * 0.86, H = Math.max(6, cell * 0.1), gap = cell * 0.03;
+  const cx = tok.position.x, left = cx - W / 2; // CENTRED on the token
+  const hpY = tok.position.y - foot * 0.5 - cell * 0.16 - H;
+  const heatY = hpY + H + gap;
+  const specs = [];
+  const bar = (y, cur, max, color) => {
+    const cells = Math.max(1, Math.min(20, Math.round(max)));
+    const filled = Math.max(0, Math.min(cells, Math.round((cur / Math.max(1, max)) * cells)));
+    const { track, fill } = tbarQuads(left, y, W, H, cells, filled);
+    specs.push({ kind: "path", commands: track, fill: "#0c0e13", fillOp: 0.5, strokeOp: 0.8, strokeW: Math.max(1, cell * 0.006) });
+    if (filled > 0) specs.push({ kind: "path", commands: fill, fill: color, fillOp: 0.66, strokeOp: 0.45, strokeW: Math.max(1, cell * 0.004) });
+  };
+  bar(hpY, t.hp, t.hpMax, "#2196f3");     // blue HP
+  bar(heatY, t.heat, t.heatMax, "#ff7a1a"); // orange Heat
+  if (selectedTokens.has(t.id)) {
+    const fs = Math.max(9, cell * 0.072);
+    specs.push({ kind: "label", text: `${t.hp}/${t.hpMax}`, x: cx, y: hpY, fontSize: fs });
+    specs.push({ kind: "label", text: `${t.heat}/${t.heatMax}`, x: cx, y: heatY, fontSize: fs });
+  }
+  return specs.map((s) => buildTbarItem(s, t.id));
+}
+
+const tbarSig = new Map(); // tokenId -> last-rendered signature
 let tokenBarsBusy = false, tokenBarsPending = false;
-// DIFF-based render: each token's bar items have deterministic ids, so we ADD
-// new ones, UPDATE existing ones in place, and DELETE only what's truly gone.
-// No full wipe (no flicker / no ~5s vanish) and no duplicate overlapping fills
-// (which was randomly brightening/dulling cells on rapid re-renders).
+// addItems-ONLY render (the Move/Sensors/Range pattern). Owlbear keeps an item's
+// cached path mesh on updateItems — changing `.commands` that way leaves the bar
+// invisible/stale — so we NEVER updateItems geometry. Instead each token's bars
+// are rebuilt (delete its old set, add a fresh set) ONLY when that token's data
+// actually changes, gated by a per-token signature. Unchanged tokens are left
+// untouched, so there's no flicker, no brightness stacking, and no vanish.
 async function renderTokenBars() {
   if (!obrReady) return;
   if (tokenBarsBusy) { tokenBarsPending = true; return; }
@@ -422,51 +436,39 @@ async function renderTokenBars() {
     const existing = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === TBAR);
     if (!tokenBarsOn) {
       if (existing.length) await OBR.scene.local.deleteItems(existing.map((i) => i.id));
+      tbarSig.clear();
       return;
     }
-    const existingById = new Map(existing.map((i) => [i.id, i]));
+    const byToken = new Map(); // tokenId -> [existing items]
+    for (const it of existing) {
+      const tid = it.metadata?.[META]?.token;
+      if (!byToken.has(tid)) byToken.set(tid, []);
+      byToken.get(tid).push(it);
+    }
     const targets = tokenBarTargets();
+    const targetIds = new Set(targets.map((t) => t.id));
     let tokens = [];
     try { tokens = await OBR.scene.items.getItems(targets.map((t) => t.id)); } catch (_) {}
     const byId = new Map(tokens.map((t) => [t.id, t]));
     const cell = hex.grid.dpi || 150;
 
-    const desired = new Map(); // id -> spec
     for (const t of targets) {
       const tok = byId.get(t.id);
-      if (!tok || !tok.position) continue;
-      const foot = cell * (t.size || 1);
-      const W = foot * 0.86, H = Math.max(6, cell * 0.1), gap = cell * 0.03;
-      const cx = tok.position.x, left = cx - W / 2; // CENTRED on the token
-      const hpY = tok.position.y - foot * 0.5 - cell * 0.16 - H;
-      const heatY = hpY + H + gap;
-      const bar = (key, y, cur, max, color) => {
-        const cells = Math.max(1, Math.min(20, Math.round(max)));
-        const filled = Math.max(0, Math.min(cells, Math.round((cur / Math.max(1, max)) * cells)));
-        const { track, fill } = tbarQuads(left, y, W, H, cells, filled);
-        desired.set(`lancer-tbar-${t.id}-${key}t`, { kind: "path", commands: track, fill: "#0c0e13", fillOp: 0.5, strokeOp: 0.8, strokeW: Math.max(1, cell * 0.006) });
-        desired.set(`lancer-tbar-${t.id}-${key}f`, { kind: "path", commands: fill.length ? fill : track, fill: color, fillOp: filled ? 0.66 : 0, strokeOp: filled ? 0.45 : 0, strokeW: Math.max(1, cell * 0.004) });
-      };
-      bar("hp", hpY, t.hp, t.hpMax, "#2196f3");
-      bar("heat", heatY, t.heat, t.heatMax, "#ff7a1a");
-      if (selectedTokens.has(t.id)) {
-        const fs = Math.max(9, cell * 0.072);
-        desired.set(`lancer-tbar-${t.id}-hpn`, { kind: "label", text: `${t.hp}/${t.hpMax}`, x: cx, y: hpY, fontSize: fs });
-        desired.set(`lancer-tbar-${t.id}-hen`, { kind: "label", text: `${t.heat}/${t.heatMax}`, x: cx, y: heatY, fontSize: fs });
-      }
+      if (!tok || !tok.position) continue; // token not found this pass — keep its bars
+      const sel = selectedTokens.has(t.id) ? 1 : 0;
+      const sig = `${Math.round(tok.position.x)},${Math.round(tok.position.y)}|${t.hp}/${t.hpMax}|${t.heat}/${t.heatMax}|${sel}|${Math.round(cell)}|${t.size || 1}`;
+      if (tbarSig.get(t.id) === sig && byToken.has(t.id)) continue; // unchanged — leave it
+      const items = buildBarsFor(t, tok, cell);
+      const old = byToken.get(t.id);
+      if (old && old.length) await OBR.scene.local.deleteItems(old.map((i) => i.id));
+      if (items.length) await OBR.scene.local.addItems(items);
+      tbarSig.set(t.id, sig);
     }
-    // If we have targets but found NONE of their tokens (a transient), keep the
-    // last good bars rather than blanking them.
-    if (!desired.size && targets.length) return;
-
-    const toAdd = [], toUpdate = [];
-    for (const [id, spec] of desired) {
-      if (existingById.has(id)) toUpdate.push(id); else toAdd.push(buildTbarItem(id, spec));
-    }
-    const toDelete = existing.filter((i) => !desired.has(i.id)).map((i) => i.id);
-    if (toAdd.length) await OBR.scene.local.addItems(toAdd);
-    if (toUpdate.length) await OBR.scene.local.updateItems(toUpdate, (its) => its.forEach((it) => applyTbarSpec(it, desired.get(it.id))));
-    if (toDelete.length) await OBR.scene.local.deleteItems(toDelete);
+    // remove bars for tokens that are no longer targets at all (unbonded / left
+    // the squad). Tokens still targeted but missing this pass are left intact.
+    const stale = existing.filter((i) => !targetIds.has(i.metadata?.[META]?.token));
+    if (stale.length) await OBR.scene.local.deleteItems(stale.map((i) => i.id));
+    for (const id of [...tbarSig.keys()]) if (!targetIds.has(id)) tbarSig.delete(id);
   } catch (e) {
     console.warn("[LANCER//UPLINK] token bars failed", e);
   } finally {
@@ -1947,9 +1949,10 @@ function recolorDicePicker() {
   document.querySelectorAll('#dicepicker .die-btn[data-die]').forEach((btn) => {
     btn.innerHTML = dieIconSvg(btn.dataset.die, body);
   });
-  // Accuracy: green hex +. Difficulty: red hex −. No outline (it clashed).
+  // Accuracy: green hex +. Difficulty: red hex −. Subtle grey outline on the
+  // hexagon itself, matching the D4–D20 dice polygons.
   const hexIcon = (color, glyph) => `<svg viewBox="0 0 40 40">
-    <polygon points="20,2 35,11 35,29 20,38 5,29 5,11" fill="${color}" stroke="none"/>
+    <polygon points="20,2 35,11 35,29 20,38 5,29 5,11" fill="${color}" stroke="rgba(255,255,255,0.55)" stroke-width="1.5" stroke-linejoin="round"/>
     <text x="20" y="27" text-anchor="middle" font-size="20" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#ffffff">${glyph}</text>
   </svg>`;
   const acc = $("addadv"), dis = $("adddis");
@@ -1958,7 +1961,7 @@ function recolorDicePicker() {
   // OVERCHARGE — duller orange hex, no outline, glyph = O flanked by bars
   const oc = $("addovercharge");
   if (oc) oc.innerHTML = `<svg viewBox="0 0 40 40" aria-label="Overcharge">
-    <polygon points="20,2 35,11 35,29 20,38 5,29 5,11" fill="#cc6a30" stroke="none"/>
+    <polygon points="20,2 35,11 35,29 20,38 5,29 5,11" fill="#cc6a30" stroke="rgba(255,255,255,0.55)" stroke-width="1.5" stroke-linejoin="round"/>
     <circle cx="20" cy="20" r="5.2" fill="none" stroke="#fff" stroke-width="2.6"/>
     <line x1="20" y1="7.5" x2="20" y2="12" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
     <line x1="20" y1="28" x2="20" y2="32.5" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
@@ -2225,9 +2228,13 @@ function refreshOverchargeBtn() {
   const n = Math.min(live?.overcharge ?? 0, t.length - 1);
   b.title = `OVERCHARGE — next cost ${t[n]} Heat (overcharged ${live?.overcharge ?? 0}× this scene). Right-click to reset.`;
 }
-// Clicking OC PRIMES the molten die (the player then hits ROLL); the tray flips
-// red while it's primed/rolling. No top context popup.
-let overchargePrimed = null; // { flat, asD3, rollsDie, cost }
+// OVERCHARGE, ported to the Overkill heat flow. The FIRST overcharge (flat 1
+// Heat) needs no die — clicking the hex shows a clean "1" with a "+1 HEAT"
+// badge beside it instantly. From the SECOND on (1d3 / 1d6 / 1d6+4) the hex
+// primes a molten die that the player fires with ROLL; the tray washes red
+// while it's primed. Either way the result reads exactly like an Overkill roll:
+// the number in an orange-outlined card with a "+N HEAT" button next to it.
+let overchargePrimed = null; // { flat, asD3, cost }
 async function primeOvercharge() {
   if (!currentMech || !live) return setStatus("Load a pilot first.", "status-err");
   switchToDiceTab();
@@ -2237,10 +2244,14 @@ async function primeOvercharge() {
   const cost = track[Math.min(live.overcharge, track.length - 1)];
   const asD3 = cost === "1d3";
   const flat = cost === "1d6+4" ? 4 : cost === "1" ? 1 : 0;
-  const rollsDie = cost !== "1";
+  if (cost === "1") {            // first overcharge — no roll, just the +1 Heat
+    clearTrayAll(); hideResult();
+    finishOvercharge(flat, cost, null);
+    return;
+  }
   clearTrayAll(); hideResult();
-  overchargePrimed = { flat, asD3, rollsDie, cost };
-  if (rollsDie) addQueued("d6", "oc", asD3 ? "d3" : null);
+  overchargePrimed = { flat, asD3, cost };
+  addQueued("d6", "oc", asD3 ? "d3" : null);
   clearContext(); // no "OVERCHARGE #1" banner
   diceTray.setOvercharge?.(true); // recolour the whole tray red
   setStatus(`OVERCHARGE primed — ${cost} Heat. Hit ROLL.`, "status-ok");
@@ -2248,36 +2259,37 @@ async function primeOvercharge() {
 async function resolveOvercharge() {
   if (!overchargePrimed || !diceTray || diceBusy) return;
   const oc = overchargePrimed;
+  overchargePrimed = null;
   diceBusy = true;
   updateAdvCount();
   try {
-    let val = 0;
-    if (oc.rollsDie) {
-      const raw = await diceTray.roll(1);
-      diceTray.zoomToDice();
-      const d = raw && raw[0] ? raw[0].value : 1;
-      val = oc.asD3 ? Math.ceil(d / 2) : d;
-    } else {
-      await new Promise((r) => setTimeout(r, 320));
-    }
-    const total = val + oc.flat;
-    showResult({ total, sub: "", kind: "oc", crit: `+${total} HEAT` });
-    live.overcharge++;
-    applyHeat(total); // cascades into Stress if it tips over capacity
-    onLiveChanged();
-    const next = overchargeTrack()[Math.min(live.overcharge, overchargeTrack().length - 1)];
-    logRoll({ kind: "sys", title: `OVERCHARGE → +${total} HEAT`, detail: `Cost ${oc.cost}${oc.rollsDie ? ` (rolled ${val})` : ""}. Next overcharge costs ${next}.` });
-    setStatus(`Overcharged: +${total} Heat (now ${live.heat}/${currentMech.stats.heatMax}).`, "status-ok");
-    refreshOverchargeBtn();
+    const raw = await diceTray.roll(1);
+    diceTray.zoomToDice();
+    const d = raw && raw[0] ? raw[0].value : 1;
+    const val = oc.asD3 ? Math.ceil(d / 2) : d;
+    finishOvercharge(val + oc.flat, oc.cost, val);
   } catch (e) {
     console.warn("[LANCER//UPLINK] overcharge failed", e);
   } finally {
-    overchargePrimed = null;
     trayQueue = []; // the molten die shouldn't ride along into the next roll
     diceBusy = false;
     updateAdvCount();
     setTimeout(() => diceTray.setOvercharge?.(false), 1400);
   }
+}
+// Shared presentation/mechanics, mirroring an Overkill roll: orange-outlined
+// number + a "+N HEAT" button the player taps to apply (heatapply handler).
+function finishOvercharge(total, cost, rolled) {
+  showResult({ total, sub: "", kind: "oc", crit: "" });
+  pendingHeat = total;
+  const hb = $("heatapply");
+  if (hb) { hb.textContent = `+${total} HEAT`; hb.classList.add("show"); }
+  live.overcharge++;
+  onLiveChanged();
+  const next = overchargeTrack()[Math.min(live.overcharge, overchargeTrack().length - 1)];
+  logRoll({ kind: "sys", title: `OVERCHARGE → +${total} HEAT`, detail: `Cost ${cost}${rolled != null ? ` (rolled ${rolled})` : ""}. Tap +${total} HEAT to apply. Next costs ${next}.` });
+  refreshOverchargeBtn();
+  setStatus(`Overcharge ${cost}: +${total} Heat — tap the badge to apply.`, "status-ok");
 }
 function resetOvercharge() {
   if (!live) return;
@@ -2289,6 +2301,20 @@ function resetOvercharge() {
 $("addovercharge")?.addEventListener("click", primeOvercharge);
 $("addovercharge")?.addEventListener("contextmenu", (e) => { e.preventDefault(); resetOvercharge(); });
 $("clear-oc")?.addEventListener("click", resetOvercharge);
+
+// House-rule gate: the OC hex + CLEAR OC button only exist when enabled. Hidden
+// by default; the dice column reflows to fit (no empty slot left behind).
+function setOverchargeEnabled(on) {
+  const oc = $("addovercharge"), clr = $("clear-oc");
+  if (oc) oc.style.display = on ? "" : "none";
+  if (clr) clr.style.display = on ? "" : "none";
+  const cb = $("overcharge-toggle");
+  if (cb) cb.checked = !!on;
+  if (!on && overchargePrimed) { overchargePrimed = null; diceTray?.setOvercharge?.(false); }
+}
+setOverchargeEnabled(false); // default OFF until the player opts in
+$("overcharge-toggle")?.addEventListener("change", () => { setOverchargeEnabled($("overcharge-toggle").checked); saveState(); });
+$("remoteroll-toggle")?.addEventListener("change", saveState);
 
 // FIRE: chains the locked weapon's damage right after its accuracy roll.
 // Respects the CRIT and OVERKILL toggles, so a crit confirmed by other means
@@ -2504,29 +2530,46 @@ async function doRoll() {
 }
 $("rolldice")?.addEventListener("click", () => { if (overchargePrimed) resolveOvercharge(); else doRoll(); });
 
-// ---- remote replays: a dedicated right-side popup tray --------------------------
-// Other players' rolls replay in their OWN tray on the right, so they never
-// interfere with your dice. The result stays dim until the dice actually land.
-let remoteTray = null;
-let remoteInitPromise = null;
-function ensureRemoteTray() {
-  if (!remoteInitPromise) remoteInitPromise = (async () => {
-    try {
-      const mod = diceMod || await import("./dice3d.js");
-      diceMod = mod;
-      remoteTray = mod.createDiceTray($("remote-dicetray"), {
-        scheme: () => "ips",
-        sound: () => false, // teammates' dice stay quiet on your end
-        height: 170,
-      });
-      remoteTray.resize();
-    } catch (e) {
-      console.warn("[LANCER//UPLINK] remote tray unavailable", e);
-      remoteTray = null;
-    }
-    return remoteTray;
-  })();
-  return remoteInitPromise;
+// ---- remote replays: a SEPARATE on-screen popover ------------------------------
+// Other players' rolls replay in their own Owlbear popover window anchored to
+// the right of the SCREEN (just left of the toolbar) — never covering the panel.
+// The panel feeds rolls to that window over the same-client LOCAL broadcast; a
+// ready/closed handshake makes the open + delivery reliable across re-opens.
+const showRemoteRolls = () => ($("remoteroll-toggle") ? $("remoteroll-toggle").checked : true);
+let rpUid = 0;
+let rpBuffer = [];      // recent public rolls (uid-tagged) for the popup to pull
+let rpOpen = false;     // is the popover believed to be open?
+
+async function openRollPopover() {
+  if (rpOpen) return;
+  rpOpen = true; // optimistic — reset on failure / on CH_RP_CLOSED
+  try {
+    let vw = 1280, vh = 720;
+    try { vw = await OBR.viewport.getWidth(); vh = await OBR.viewport.getHeight(); } catch (_) {}
+    await OBR.popover.open({
+      id: RP_POPOVER,
+      url: RP_POPOVER_URL,
+      width: 300,
+      height: 244,
+      // right edge of the popover sits ~86px from the screen edge — a gap left of
+      // Owlbear's right-hand toolbar, mirroring the toolbar's own edge margin
+      anchorReference: "POSITION",
+      anchorPosition: { left: Math.max(8, Math.round(vw - 86)), top: Math.round(vh / 2) },
+      anchorOrigin: { horizontal: "RIGHT", vertical: "CENTER" },
+      transformOrigin: { horizontal: "RIGHT", vertical: "CENTER" },
+      disableClickAway: true,
+      hidePaper: true,
+      marginThreshold: 0,
+    });
+  } catch (e) {
+    console.warn("[LANCER//UPLINK] roll popover open failed", e);
+    rpOpen = false;
+  }
+}
+
+function flushRollPopup() {
+  if (!rpBuffer.length) return;
+  try { rpBuffer.forEach((d) => OBR.broadcast.sendMessage(CH_RP, d, { destination: "LOCAL" })); } catch (_) {}
 }
 
 function onRemoteRoll(d) {
@@ -2540,54 +2583,13 @@ function onRemoteRoll(d) {
     critTxt: d.crit ? `<span class="crit"> ${d.crit}</span>` : "",
   });
   try { OBR.notification.show(`${d.who}: ${d.label} → ${d.total}`, "INFO"); } catch (_) {}
+  if (!showRemoteRolls()) return; // the combat log still has it
 
-  replayQueue.push(d);
-  updateAdvCount();
-  pumpReplayQueue();
-}
-
-async function pumpReplayQueue() {
-  if (replayActive) return; // popup busy — one teammate roll at a time
-  const tray = await ensureRemoteTray();
-  if (!tray) { replayQueue = []; updateAdvCount(); return; } // no 3D — the log still has it
-  if (tray.isRolling()) { setTimeout(pumpReplayQueue, 400); return; }
-  const d = replayQueue.shift();
-  if (!d) return;
-  replayActive = true;
-  updateAdvCount();
-  const popup = $("remote-popup");
-  const res = $("rp-result");
-  try {
-    $("rp-who").textContent = d.who || "TABLE";
-    const more = replayQueue.length;
-    $("rp-q").textContent = more ? `+${more} queued` : "";
-    $("rp-label").textContent =
-      d.kind === "dmg" ? "DAMAGE" : d.kind === "tech" ? "TECH" : d.kind === "sys" ? "CHECK" : "ACCURACY";
-    $("rp-total").textContent = "—";
-    $("rp-crit").textContent = "";
-    res.className = "rp-result"; // dim — result not highlighted until it lands
-    if (d.kind === "dmg") res.classList.add("dmg");
-    if (d.kind === "tech") res.classList.add("tech");
-    popup?.classList.add("show");
-    tray.resize();
-    await tray.replay(d.dice || [], 1, d.scheme || null); // roller's faction colours
-    tray.zoomToDice();
-    // reveal + highlight ONLY now that the dice have settled
-    $("rp-total").textContent = String(d.total);
-    $("rp-crit").textContent = d.crit || "";
-    res.classList.add("revealed");
-    // hold long enough to read; quicker when more rolls are waiting
-    await new Promise((r) => setTimeout(r, replayQueue.length ? 2200 : 3400));
-    if (!tray.isRolling()) { tray.clearTray(); tray.resetCamera(); }
-    if (!replayQueue.length) popup?.classList.remove("show"); // slide away when done
-  } catch (e) {
-    console.warn("[LANCER//UPLINK] remote replay failed", e);
-    popup?.classList.remove("show");
-  } finally {
-    replayActive = false;
-    updateAdvCount();
-    if (replayQueue.length) setTimeout(pumpReplayQueue, 250);
-  }
+  const entry = { ...d, uid: `${Date.now()}-${++rpUid}` };
+  rpBuffer.push(entry);
+  if (rpBuffer.length > 12) rpBuffer.shift();
+  openRollPopover();   // idempotent
+  flushRollPopup();    // covers the already-open case; the ready handshake covers the rest
 }
 
 // ---- roll log -------------------------------------------------------------------------
@@ -2953,6 +2955,9 @@ async function start() {
         if (tokenBarsOn) renderTokenBars(); // a teammate's HP/Heat changed
       }
     });
+    // same-client handshake with the on-screen roll popover
+    OBR.broadcast.onMessage(CH_RP_READY, () => { rpOpen = true; flushRollPopup(); });
+    OBR.broadcast.onMessage(CH_RP_CLOSED, () => { rpOpen = false; rpBuffer = []; });
   } catch (e) {
     console.warn("[LANCER//UPLINK] broadcast channels unavailable", e);
   }
@@ -2995,6 +3000,8 @@ async function start() {
   if (st.uiScale) { uiScale = st.uiScale; applyUiScale(); }
   if ($("macro-toggle")) $("macro-toggle").checked = !!st.macro;
   if (st.tokenBars) { tokenBarsOn = true; if ($("tokenbars-toggle")) $("tokenbars-toggle").checked = true; }
+  setOverchargeEnabled(!!st.overcharge); // off unless the player turned it on
+  if ($("remoteroll-toggle") && st.showRemoteRolls === false) $("remoteroll-toggle").checked = false;
   if (st.bond && st.bond.id) bond = st.bond;
   updateBondUI();
   if (st.live) restoreLive = st.live;

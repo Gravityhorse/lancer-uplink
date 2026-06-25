@@ -497,42 +497,54 @@ function paintMode(icon) {
 }
 
 // ---- pen (freehand drawing, NO grid snapping) ---------------------------------
-// A true freehand stroke: it samples the raw pointer path (never snaps to hexes)
-// and grows a single path item as you drag. Moderate thickness scaled to the
-// tile size (~1/9 of a cell, where one cell ≈ one token). Honours the ALL/ME
-// visibility, draws in the shared Template Color, and is erasable + undoable.
-let penPts = null, penItemId = null, penLocal = false, penGroup = null;
+// A true freehand stroke that samples the raw pointer path (never snaps to
+// hexes). Built as MANY short 2-point segments added with addItems — exactly
+// the proven Move/Sensors/Range pattern. We deliberately NEVER updateItems()
+// the geometry: Owlbear re-renders an item's position on update but keeps the
+// cached path mesh, so a growing `.commands` array goes invisible. Each segment
+// is round-capped so they read as one continuous line. Moderate thickness
+// scaled to the tile size (~1/9 of a cell, one cell ≈ one token). Honours the
+// ALL/ME visibility, draws in the shared Template Color, erasable + undoable.
+let penLast = null, penLocal = false, penGroup = null;
 let penChain = Promise.resolve();
 const penApi = (local) => (local ? OBR.scene.local : OBR.scene.items);
 const penWidth = () => Math.max(3, (grid.dpi || 150) * 0.11);
-const penStep = () => (grid.dpi || 150) * 0.05; // min pointer travel between samples
+const penStep = () => (grid.dpi || 150) * 0.045; // min pointer travel between samples
 
+function penSegmentItem(a, b) {
+  let p = buildPath().position({ x: 0, y: 0 })
+    .commands([[Command.MOVE, a.x, a.y], [Command.LINE, b.x, b.y]])
+    .fillOpacity(0).strokeColor(paintColor).strokeOpacity(0.92).strokeWidth(penWidth())
+    .layer("DRAWING").name("Pen")
+    .metadata({ [META]: { kind: penLocal ? "pen-local" : "pen", group: penGroup } });
+  // round caps/joins make consecutive segments read as one smooth stroke
+  const opt = (fn, ...args) => { try { if (typeof p[fn] === "function") p = p[fn](...args); } catch (_) {} };
+  opt("strokeCap", "round");
+  opt("strokeJoin", "round");
+  return p.build();
+}
+async function penDab(a, b) {
+  try { await penApi(penLocal).addItems([penSegmentItem(a, b)]); } catch (_) {}
+}
 async function penStart(p) {
   penLocal = templateVisibility === "me";
   penGroup = `pen-${Date.now()}-${++groupSeq}`;
-  penPts = [[Command.MOVE, p.x, p.y]];
-  const item = buildPath().position({ x: 0, y: 0 }).commands(penPts.slice())
-    .fillOpacity(0).strokeColor(paintColor).strokeOpacity(0.92).strokeWidth(penWidth())
-    .layer("DRAWING").name("Pen")
-    .metadata({ [META]: { kind: penLocal ? "pen-local" : "pen", group: penGroup } })
-    .build();
-  penItemId = item.id;
-  try { await penApi(penLocal).addItems([item]); } catch (_) { penItemId = null; }
+  penLast = { x: p.x, y: p.y };
+  await penDab(penLast, { x: p.x + 0.6, y: p.y + 0.6 }); // a dot so a click leaves a mark
 }
 async function penExtend(p) {
-  if (!penItemId || !penPts) return;
-  const last = penPts[penPts.length - 1];
-  if (last && Math.hypot(p.x - last[1], p.y - last[2]) < penStep()) return;
-  penPts.push([Command.LINE, p.x, p.y]);
-  const cmds = penPts.slice();
-  try { await penApi(penLocal).updateItems([penItemId], (its) => its.forEach((it) => { it.commands = cmds; })); } catch (_) {}
+  if (!penLast) return;
+  if (Math.hypot(p.x - penLast.x, p.y - penLast.y) < penStep()) return;
+  const a = penLast;
+  penLast = { x: p.x, y: p.y };
+  await penDab(a, penLast);
 }
 function penFinish() {
-  if (penGroup && penPts && penPts.length > 1) {
+  if (penGroup) {
     undoStack.push({ local: penLocal, group: penGroup });
     if (undoStack.length > 40) undoStack.shift();
   }
-  penPts = null; penItemId = null; penGroup = null;
+  penLast = null; penGroup = null;
 }
 const penDo = (fn) => { penChain = penChain.then(fn).catch(() => {}); return penChain; };
 
@@ -545,11 +557,7 @@ function penMode(icon) {
     async onToolDragMove(_ctx, ev) { const p = ev.pointerPosition; await penDo(() => penExtend(p)); },
     onToolDragEnd() { penDo(() => penFinish()); },
     onToolDragCancel() { penDo(() => penFinish()); },
-    // a lone click leaves a small dot
-    async onToolClick(_ctx, ev) {
-      const p = ev.pointerPosition;
-      await penDo(async () => { await penStart(p); await penExtend({ x: p.x + penStep() + 1, y: p.y }); penFinish(); });
-    },
+    async onToolClick(_ctx, ev) { const p = ev.pointerPosition; await penDo(async () => { await penStart(p); penFinish(); }); },
   };
 }
 
@@ -637,6 +645,8 @@ export async function registerTool() {
   // white eraser cursor (data-URI SVG) — replaces the red "not-allowed" circle
   const eraseCursor =
     "url(\"data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='22'%20height='22'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='white'%20stroke-width='2.2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M4%2015%20L11%208%20L18%2015%20L13%2020%20L9%2020%20Z'/%3E%3Cline%20x1='6'%20y1='20'%20x2='20'%20y2='20'/%3E%3C/svg%3E\") 4 18, crosshair";
+  let eraseChain = Promise.resolve();
+  const eraseDrag = (p) => { eraseChain = eraseChain.then(() => eraseAt(p)).catch(() => {}); return eraseChain; };
   await OBR.tool.createMode({
     id: MODES.erase,
     icons: [{ icon: iconUrl("erase.svg"), label: "Erase", filter: { activeTools: [TOOL] } }],
@@ -646,6 +656,9 @@ export async function registerTool() {
       const did = await eraseAt(ev.pointerPosition);
       if (!did) { try { await OBR.tool.activateMode(MODES.move); } catch (_) {} }
     },
+    // hold-and-drag erases continuously (serialised so passes never race)
+    async onToolDragStart(_ctx, ev) { await eraseDrag(ev.pointerPosition); },
+    async onToolDragMove(_ctx, ev) { await eraseDrag(ev.pointerPosition); },
   });
 
   registered = true;

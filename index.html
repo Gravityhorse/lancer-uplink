@@ -208,42 +208,8 @@
       /* range sliders — navy + a touch duller, not the bright Windows blue */
       input[type="range"] { accent-color: #21407a; height: 4px; }
 
-      /* ---- remote-roll side popup (other players' dice) ---- */
-      #remote-popup {
-        position: fixed; top: 80px; right: 0; width: 192px; z-index: 45;
-        pointer-events: none; /* never blocks your own tray */
-        background: linear-gradient(180deg, rgba(13,18,28,0.97), rgba(8,11,17,0.97));
-        border: 1px solid var(--tech); border-right: none;
-        border-radius: 8px 0 0 8px;
-        box-shadow: -6px 6px 22px rgba(0,0,0,0.55), inset 0 0 18px rgba(63,167,214,0.08);
-        transform: translateX(108%); transition: transform 0.42s cubic-bezier(0.4,0,0.2,1);
-        overflow: hidden;
-      }
-      #remote-popup.show { transform: translateX(0); }
-      .rp-head {
-        display: flex; align-items: center; gap: 6px; padding: 6px 9px;
-        font-family: var(--mono); font-size: 11px; letter-spacing: 1px; color: #bfeaff;
-        background: rgba(47,107,189,0.18); border-bottom: 1px solid rgba(126,230,255,0.35);
-        text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      }
-      .rp-head .rp-spark { color: var(--tech); animation: rpblink 1s steps(2) infinite; }
-      @keyframes rpblink { 50% { opacity: 0.25; } }
-      #rp-who { font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
-      .rp-q { margin-left: auto; color: var(--muted); font-size: 9px; letter-spacing: 0; }
-      .remote-dicetray { width: 192px; height: 170px; background: radial-gradient(ellipse at 50% 35%, #1b2230 0%, #0c0e13 100%); }
-      .rp-result {
-        display: flex; align-items: baseline; gap: 7px; padding: 7px 10px 8px;
-        border-top: 1px solid rgba(126,230,255,0.25); min-height: 30px;
-      }
-      .rp-label { font-size: 9px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; }
-      .rp-total {
-        margin-left: auto; font-family: var(--mono); font-weight: 700; font-size: 24px; line-height: 1;
-        color: #4b5566; transition: color 0.25s, text-shadow 0.25s; /* dim until the roll lands */
-      }
-      .rp-result.revealed .rp-total { color: #eaf6ff; text-shadow: 0 0 12px rgba(126,230,255,0.7); }
-      .rp-result.revealed.dmg .rp-total { text-shadow: 0 0 12px rgba(255,61,0,0.7); }
-      .rp-result.revealed.tech .rp-total { text-shadow: 0 0 12px rgba(61,165,255,0.7); }
-      .rp-crit { font-size: 10px; font-weight: 700; color: var(--gold); }
+      /* (the remote-roll display now lives in the standalone roll-popup.html
+         popover window — its styles travel with that page) */
 
       /* ---- frame easter eggs ---- */
       .egg-btn { display: block; width: 100%; margin-top: 10px; padding: 11px 10px; border: 2px solid; border-radius: 6px; font-family: var(--font); font-weight: 700; letter-spacing: 1.5px; font-size: 12px; cursor: pointer; text-transform: uppercase; }
@@ -348,10 +314,9 @@
       #resultcard .crit { color: var(--gold); font-size: 10px; font-weight: 700; }
       #resultcard.dmg { border-color: var(--heatred); }
       #resultcard.tech { border-color: var(--tech); }
-      /* OVERCHARGE result: orange-outlined number with a bold [+N HEAT] line */
+      /* OVERCHARGE result: a normal white number in an orange-outlined card,
+         with the standard "+N HEAT" badge beside it (same as Overkill) */
       #resultcard.oc { border-color: #cc6a30; }
-      #resultcard.oc .num { color: #ffd9a0; }
-      #resultcard.oc .crit { color: #ff9a3d; font-size: 13px; font-weight: 800; letter-spacing: 0.5px; }
       #firebtn { display: none; background: #ff1a1a; color: #fff; border: 2px solid #ff6b6b; border-radius: 8px; font-family: var(--font); font-weight: 700; font-size: 15px; letter-spacing: 3px; padding: 10px 16px; cursor: pointer; text-shadow: 0 0 6px #fff; box-shadow: 0 0 14px rgba(255, 26, 26, 0.7); animation: firepulse 0.9s ease-in-out infinite alternate; }
       #firebtn.show { display: inline-block; }
       /* crit FIRE drops the "(CRIT)" text but keeps a gold tell */
@@ -392,9 +357,9 @@
       .sndbtn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; font-size: 12px; padding: 3px 7px; cursor: pointer; line-height: 1; }
       .sndbtn.off { opacity: 0.45; }
       .sndbtn:hover { border-color: var(--crimson); }
-      /* CLEAR OC — resets the Overcharge track after a full rest */
-      .occlr { background: var(--panel-2); border: 1px solid #7a4423; color: #ffb070; border-radius: 3px; font-family: var(--mono); font-size: 9px; letter-spacing: 0.5px; padding: 4px 8px; cursor: pointer; line-height: 1; white-space: nowrap; }
-      .occlr:hover { border-color: #cc6a30; color: #ffd9a0; }
+      /* CLEAR OC — resets the Overcharge track after a full rest (standard grey) */
+      .occlr { background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); border-radius: 3px; font-family: var(--mono); font-size: 9px; letter-spacing: 0.5px; padding: 4px 8px; cursor: pointer; line-height: 1; white-space: nowrap; }
+      .occlr:hover { border-color: var(--crimson); color: var(--text); }
 
       #rolllog { max-height: 200px; overflow-y: auto; }
       .roll { background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--crimson); border-radius: 3px; padding: 6px 8px; margin-bottom: 6px; font-size: 12px; }
@@ -414,16 +379,13 @@
       .bond-status.on { color: var(--good); }
       #vis-toggle { background: var(--panel-2); border: 1px solid var(--line); color: var(--gold); font-family: var(--mono); font-size: 11px; padding: 6px 10px; cursor: pointer; border-radius: 3px; }
       #vis-toggle.all { color: var(--good); }
-      /* Template Color: a button that smoothly drops to reveal the swatches,
-         hidden by default (visible colours break immersion). One colour drives
-         Blast / Cone / Line / Paint / Pen. */
+      /* Template Color: a plain button (matching CLEAR MY RANGE FIELDS) that
+         smoothly drops to reveal the swatches, hidden by default (visible
+         colours break immersion). One colour drives Blast/Cone/Line/Paint/Pen. */
       .tplcolor { margin-top: 9px; }
-      #tplcolor-toggle { display: flex; align-items: center; gap: 8px; width: 100%; justify-content: flex-start; }
-      .tcdot { width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.45); background: #d22f3d; flex: 0 0 auto; box-shadow: 0 0 5px rgba(0,0,0,0.4); }
-      .tccaret { margin-left: auto; font-size: 10px; transition: transform 0.25s; }
-      #tplcolor-toggle.open .tccaret { transform: rotate(180deg); }
+      #tplcolor-toggle { width: 100%; }
       .tplcolor-drop { max-height: 0; overflow: hidden; transition: max-height 0.28s cubic-bezier(0.4,0,0.2,1); }
-      .tcswatches { display: flex; gap: 6px; padding: 8px 1px 2px; }
+      .tcswatches { display: flex; gap: 6px; padding: 8px 1px 2px; justify-content: center; }
       .swatch { width: 26px; height: 26px; border-radius: 4px; border: 2px solid rgba(255,255,255,0.25); cursor: pointer; padding: 0; transition: transform 0.1s, border-color 0.1s, box-shadow 0.1s; }
       .swatch:hover { transform: scale(1.1); }
       .swatch.sel { border-color: #fff; box-shadow: 0 0 8px rgba(255,255,255,0.55); }
@@ -610,7 +572,7 @@
           <button class="die-btn" data-die="d20" title="Add a d20">d20</button>
           <button id="addadv" class="die-btn accbtn" title="Add an Accuracy d6 (blue/gold crystal)">ACC</button>
           <button id="adddis" class="die-btn disbtn" title="Add a Difficulty d6 (purple/white crystal)">DIF</button>
-          <button id="addovercharge" class="die-btn ocbtn" title="OVERCHARGE — roll the escalating heat cost. Right-click to reset.">OC</button>
+          <button id="addovercharge" class="die-btn ocbtn" title="OVERCHARGE — escalating heat 1 / 1d3 / 1d6 / 1d6+4 (first is instant; the rest prime a die for ROLL). Right-click to reset.">OC</button>
         </div>
 
         <div id="traywrap">
@@ -693,16 +655,14 @@
               <button id="vis-toggle" class="all" title="Who sees weapon templates you place">👁 TEMPLATES: ALL PLAYERS</button>
             </div>
             <div class="row">
-              <button id="btn-undo-tmpl" class="btn ghost small" title="Remove the last template you placed">↶ UNDO LAST</button>
+              <button id="btn-undo-tmpl" class="btn ghost small" title="Remove the last template you placed">UNDO LAST</button>
               <button id="clearmine" class="btn ghost small">CLEAR MY TEMPLATES</button>
             </div>
             <div class="row" style="margin-top:6px">
               <button id="clearranges" class="btn ghost small">CLEAR MY RANGE FIELDS</button>
             </div>
             <div class="tplcolor">
-              <button id="tplcolor-toggle" class="btn ghost small" aria-expanded="false" title="Colour for Blast, Cone, Line, Paint & Pen">
-                <span class="tcdot" id="tplcolor-dot"></span>TEMPLATE COLOR<span class="tccaret">▾</span>
-              </button>
+              <button id="tplcolor-toggle" class="btn ghost small" aria-expanded="false" title="Colour for Blast, Cone, Line, Paint & Pen">TEMPLATE COLOR</button>
               <div id="tplcolor-drop" class="tplcolor-drop"><div id="tplcolor-swatches" class="tcswatches"></div></div>
             </div>
           </div>
@@ -747,6 +707,8 @@
             <label class="chk"><input id="macro-toggle" type="checkbox" /> AUTO STRUCTURE / OVERHEAT TABLE ROLLS</label>
             <p class="muted" style="margin:6px 0 0; line-height:1.5">When HP hits 0 or Heat exceeds Heat Capacity, automatically roll the structure / overheating table and post the results to the Combat Log.</p>
             <label class="chk" style="margin-top:12px"><input id="tokenbars-toggle" type="checkbox" /> LIVE HP / HEAT BARS OVER BONDED TOKENS</label>
+            <label class="chk" style="margin-top:12px"><input id="overcharge-toggle" type="checkbox" /> OVERCHARGE</label>
+            <label class="chk" style="margin-top:12px"><input id="remoteroll-toggle" type="checkbox" checked /> SHOW OTHER PLAYERS' DICE ROLLS</label>
             <label style="margin-top:12px">UI text size <span id="font-val" style="color:var(--text);font-family:var(--mono)">100%</span></label>
             <div class="row">
               <button id="font-minus" class="btn ghost small" title="Smaller text">A−</button>
@@ -802,22 +764,9 @@
       </section>
     </main>
 
-    <!-- Teammates' (non-hidden) rolls replay HERE — a self-contained tray on the
-         right that never touches your own dice. Slides in, plays, reveals the
-         result, pans to the next in queue. -->
-    <div id="remote-popup">
-      <div class="rp-head">
-        <span class="rp-spark">▸</span>
-        <span id="rp-who">PLAYER</span>
-        <span id="rp-q" class="rp-q"></span>
-      </div>
-      <div id="remote-dicetray" class="remote-dicetray"></div>
-      <div id="rp-result" class="rp-result">
-        <span id="rp-label" class="rp-label">ACCURACY</span>
-        <span id="rp-total" class="rp-total">—</span>
-        <span id="rp-crit" class="rp-crit"></span>
-      </div>
-    </div>
+    <!-- Teammates' (non-hidden) rolls now replay in a SEPARATE on-screen popover
+         window (roll-popup.html), opened to the right of the screen so it never
+         covers this panel. See onRemoteRoll / roll-popup.js. -->
 
     <!-- MANTICORE: Eye of Horus flash -->
     <div id="godhead-eye" aria-hidden="true">

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LANCER // UPLINK — table roll</title>
+  <style>
+    :root {
+      --tech: #3da5ff; --muted: #7d8aa0; --gold: #ffcf6b;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+      --font: "Eurostile", "Bahnschrift", "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; padding: 0; background: transparent; overflow: hidden; color: #eaf2ff; font-family: var(--font); }
+    #rp {
+      width: 100%; height: 100%;
+      background: linear-gradient(180deg, rgba(13,18,28,0.97), rgba(8,11,17,0.97));
+      border: 1px solid var(--tech); border-radius: 10px;
+      box-shadow: 0 8px 26px rgba(0,0,0,0.6), inset 0 0 18px rgba(63,167,214,0.08);
+      overflow: hidden; display: flex; flex-direction: column;
+    }
+    #rp-head {
+      display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+      font-family: var(--mono); font-size: 11px; letter-spacing: 1px; color: #bfeaff;
+      background: rgba(47,107,189,0.18); border-bottom: 1px solid rgba(126,230,255,0.35);
+      text-transform: uppercase; white-space: nowrap;
+    }
+    .rp-spark { color: var(--tech); animation: rpblink 1s steps(2) infinite; }
+    @keyframes rpblink { 50% { opacity: 0.25; } }
+    #rp-who { font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+    #rp-q { margin-left: auto; color: var(--muted); font-size: 9px; letter-spacing: 0; }
+    #rp-tray { flex: 1 1 auto; min-height: 0; background: radial-gradient(ellipse at 50% 35%, #1b2230 0%, #0c0e13 100%); }
+    #rp-result { display: flex; align-items: baseline; gap: 7px; padding: 7px 12px 9px; border-top: 1px solid rgba(126,230,255,0.25); min-height: 30px; }
+    #rp-label { font-size: 9px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; }
+    #rp-total { margin-left: auto; font-family: var(--mono); font-weight: 700; font-size: 26px; line-height: 1; color: #4b5566; transition: color 0.25s, text-shadow 0.25s; }
+    #rp-result.revealed #rp-total { color: #eaf6ff; text-shadow: 0 0 12px rgba(126,230,255,0.7); }
+    #rp-result.revealed.dmg #rp-total { text-shadow: 0 0 12px rgba(255,61,0,0.7); }
+    #rp-result.revealed.tech #rp-total { text-shadow: 0 0 12px rgba(61,165,255,0.7); }
+    #rp-crit { font-size: 10px; font-weight: 700; color: var(--gold); }
+  </style>
+</head>
+<body>
+  <div id="rp">
+    <div id="rp-head"><span class="rp-spark">◈</span><span id="rp-who">TABLE</span><span id="rp-q"></span></div>
+    <div id="rp-tray"></div>
+    <div id="rp-result"><span id="rp-label">ACCURACY</span><span id="rp-total">—</span><span id="rp-crit"></span></div>
+  </div>
+  <script type="module" src="./roll-popup.js"></script>
+</body>
+</html>
