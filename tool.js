@@ -11,7 +11,7 @@
 // Every template is a GROUP (path + label + origin marker) sharing a group
 // id, so erase and UNDO remove the whole thing together.
 
-import { OBR, ID, META, buildLabel } from "./sdk.js";
+import { OBR, ID, META, buildLabel, buildPath, Command } from "./sdk.js";
 import {
   pixelToHex,
   hexesInRange,
@@ -39,6 +39,7 @@ export const MODES = {
   cone: `${ID}/mode-cone`,
   line: `${ID}/mode-line`,
   paint: `${ID}/mode-paint`,
+  pen: `${ID}/mode-pen`,
   erase: `${ID}/mode-erase`,
 };
 
@@ -61,14 +62,12 @@ export async function armPaint() {
   try { await OBR.tool.activateTool(TOOL); await OBR.tool.activateMode(MODES.paint); } catch (_) {}
 }
 
-const COLORS = {
-  move: "#5ad17a",
-  tech: "#3da5ff",
-  weapon: "#d22f3d",
-  blast: "#d22f3d",
-  cone: "#d22f3d",
-  line: "#d22f3d",
-};
+// Move / Sensors / Range keep their semantic colours. Blast / Cone / Line /
+// Paint / Pen all draw in the shared "Template Color" the player picks in the
+// panel (default red) — see PAINT_COLORS / setPaintColor above.
+const FIXED_COLORS = { move: "#5ad17a", tech: "#3da5ff", weapon: "#d22f3d" };
+const COLORS = { ...FIXED_COLORS, blast: "#d22f3d", cone: "#d22f3d", line: "#d22f3d" };
+const shapeColor = (shape) => FIXED_COLORS[shape] || paintColor;
 
 const LABELS = {
   move: "Move",
@@ -156,7 +155,7 @@ function originMarkerItem(originHex, color, group, kind) {
 // shape: semantic shape; hexes: cells; opts: { name, n, labelHex, originHex }
 async function placeTemplate(shape, hexes, opts = {}) {
   if (!hexes.length) return;
-  const color = COLORS[shape] || COLORS.blast;
+  const color = shapeColor(shape);
   const local = ALWAYS_LOCAL.has(shape) || templateVisibility === "me";
   const kind = local ? "template-local" : "template";
   const group = `g${Date.now()}-${++groupSeq}`;
@@ -284,7 +283,7 @@ async function placeOnce(fn) {
 // ---- modes -------------------------------------------------------------------------------
 
 function blastMode(icon) {
-  const colorOf = () => COLORS[armed?.shape || "blast"];
+  const colorOf = () => shapeColor(armed?.shape || "blast");
   return {
     id: MODES.blast,
     icons: [{ icon, label: "Blast", filter: { activeTools: [TOOL] } }],
@@ -306,7 +305,7 @@ function blastMode(icon) {
       await placeOnce(async () => {
         const h = pixelToHex(ev.pointerPosition);
         if (a.boost) {
-          await showBoostField(`tool-boost-${++boostSeq}`, h, a.size, { color: COLORS[a.shape], name: a.name });
+          await showBoostField(`tool-boost-${++boostSeq}`, h, a.size, { color: shapeColor(a.shape), name: a.name });
         } else {
           await placeTemplate(a.shape, hexesInRange(h, a.size, true), {
             name: a.name, originHex: a.shape === "blast" ? h : null,
@@ -336,7 +335,7 @@ function blastMode(icon) {
         const name = a ? a.name : `Blast ${n}`;
         const shape = a ? a.shape : "blast";
         if (a && a.boost) {
-          await showBoostField(`tool-boost-${++boostSeq}`, origin, a.size, { color: COLORS[a.shape], name: a.name });
+          await showBoostField(`tool-boost-${++boostSeq}`, origin, a.size, { color: shapeColor(a.shape), name: a.name });
         } else {
           await placeTemplate(shape, hexesInRange(origin, n, true), {
             name, n, labelHex: pixelToHex(ev.pointerPosition),
@@ -359,7 +358,6 @@ function blastMode(icon) {
 // Directional modes. Cone snaps to grid-friendly angles; the LINE runs free
 // in any direction (it samples cells along the true pointer bearing).
 function directionalMode(shape, icon, fn, snap) {
-  const color = COLORS[shape];
   const angleOf = (origin, ev) => {
     const o = hexToPixel(origin);
     const raw = Math.atan2(ev.pointerPosition.y - o.y, ev.pointerPosition.x - o.x);
@@ -381,7 +379,7 @@ function directionalMode(shape, icon, fn, snap) {
     async onToolDragMove(_ctx, ev) {
       if (!dragOrigin) return;
       const n = sizeOf(dragOrigin, ev);
-      requestPreview(fn(dragOrigin, angleOf(dragOrigin, ev), n), color,
+      requestPreview(fn(dragOrigin, angleOf(dragOrigin, ev), n), shapeColor(shape),
         { pos: ev.pointerPosition, n });
     },
     async onToolDragEnd(_ctx, ev) {
@@ -475,12 +473,12 @@ async function erasePaintAt(p) {
 export async function clearMyPaint() {
   painted.clear();
   try {
-    const loc = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === "paint-local");
+    const loc = await OBR.scene.local.getItems((i) => ["paint-local", "pen-local"].includes(i.metadata?.[META]?.kind));
     if (loc.length) await OBR.scene.local.deleteItems(loc.map((i) => i.id));
   } catch (_) {}
   try {
     const me = await OBR.player.getId();
-    const sh = await OBR.scene.items.getItems((i) => i.metadata?.[META]?.kind === "paint" && i.createdUserId === me);
+    const sh = await OBR.scene.items.getItems((i) => ["paint", "pen"].includes(i.metadata?.[META]?.kind) && i.createdUserId === me);
     if (sh.length) await OBR.scene.items.deleteItems(sh.map((i) => i.id));
   } catch (_) {}
 }
@@ -498,6 +496,63 @@ function paintMode(icon) {
   };
 }
 
+// ---- pen (freehand drawing, NO grid snapping) ---------------------------------
+// A true freehand stroke: it samples the raw pointer path (never snaps to hexes)
+// and grows a single path item as you drag. Moderate thickness scaled to the
+// tile size (~1/9 of a cell, where one cell ≈ one token). Honours the ALL/ME
+// visibility, draws in the shared Template Color, and is erasable + undoable.
+let penPts = null, penItemId = null, penLocal = false, penGroup = null;
+let penChain = Promise.resolve();
+const penApi = (local) => (local ? OBR.scene.local : OBR.scene.items);
+const penWidth = () => Math.max(3, (grid.dpi || 150) * 0.11);
+const penStep = () => (grid.dpi || 150) * 0.05; // min pointer travel between samples
+
+async function penStart(p) {
+  penLocal = templateVisibility === "me";
+  penGroup = `pen-${Date.now()}-${++groupSeq}`;
+  penPts = [[Command.MOVE, p.x, p.y]];
+  const item = buildPath().position({ x: 0, y: 0 }).commands(penPts.slice())
+    .fillOpacity(0).strokeColor(paintColor).strokeOpacity(0.92).strokeWidth(penWidth())
+    .layer("DRAWING").name("Pen")
+    .metadata({ [META]: { kind: penLocal ? "pen-local" : "pen", group: penGroup } })
+    .build();
+  penItemId = item.id;
+  try { await penApi(penLocal).addItems([item]); } catch (_) { penItemId = null; }
+}
+async function penExtend(p) {
+  if (!penItemId || !penPts) return;
+  const last = penPts[penPts.length - 1];
+  if (last && Math.hypot(p.x - last[1], p.y - last[2]) < penStep()) return;
+  penPts.push([Command.LINE, p.x, p.y]);
+  const cmds = penPts.slice();
+  try { await penApi(penLocal).updateItems([penItemId], (its) => its.forEach((it) => { it.commands = cmds; })); } catch (_) {}
+}
+function penFinish() {
+  if (penGroup && penPts && penPts.length > 1) {
+    undoStack.push({ local: penLocal, group: penGroup });
+    if (undoStack.length > 40) undoStack.shift();
+  }
+  penPts = null; penItemId = null; penGroup = null;
+}
+const penDo = (fn) => { penChain = penChain.then(fn).catch(() => {}); return penChain; };
+
+function penMode(icon) {
+  return {
+    id: MODES.pen,
+    icons: [{ icon, label: "Pen", filter: { activeTools: [TOOL] } }],
+    cursors: [{ cursor: "crosshair" }],
+    async onToolDragStart(_ctx, ev) { const p = ev.pointerPosition; await penDo(() => penStart(p)); },
+    async onToolDragMove(_ctx, ev) { const p = ev.pointerPosition; await penDo(() => penExtend(p)); },
+    onToolDragEnd() { penDo(() => penFinish()); },
+    onToolDragCancel() { penDo(() => penFinish()); },
+    // a lone click leaves a small dot
+    async onToolClick(_ctx, ev) {
+      const p = ev.pointerPosition;
+      await penDo(async () => { await penStart(p); await penExtend({ x: p.x + penStep() + 1, y: p.y }); penFinish(); });
+    },
+  };
+}
+
 // ---- eraser (group-aware) ------------------------------------------------------------------
 // Removes the WHOLE template group (path + label + origin marker) of whatever
 // you click, plus painted tiles. Range fields are cleared from the panel.
@@ -508,7 +563,9 @@ async function eraseAt(p) {
     if (i.position && (i.position.x || i.position.y)) {
       if (Math.hypot(i.position.x - p.x, i.position.y - p.y) < radius) return true;
     }
-    return (i.commands || []).some((c) => c[0] === 0 && Math.hypot(c[1] - p.x, c[2] - p.y) < radius);
+    // test EVERY vertex (MOVE + LINE both carry x,y) so clicking anywhere along
+    // a long freehand Pen stroke — not just its start point — erases it
+    return (i.commands || []).some((c) => c.length >= 3 && Math.hypot(c[1] - p.x, c[2] - p.y) < radius);
   };
 
   await deleteAllPreviews();
@@ -526,21 +583,25 @@ async function eraseAt(p) {
   };
 
   if (await wipeGroups(OBR.scene.local, "template-local")) return true;
+  if (await wipeGroups(OBR.scene.local, "pen-local")) return true;
 
-  // shared templates: only my own
-  try {
-    const me = await OBR.player.getId();
-    const all = await OBR.scene.items.getItems((i) => i.metadata?.[META]?.kind === "template");
-    const hit = all.filter((i) => i.createdUserId === me && near(i));
-    if (hit.length) {
+  // shared templates + pen strokes: only my own
+  const wipeSharedOwn = async (kind) => {
+    try {
+      const me = await OBR.player.getId();
+      const all = await OBR.scene.items.getItems((i) => i.metadata?.[META]?.kind === kind);
+      const hit = all.filter((i) => i.createdUserId === me && near(i));
+      if (!hit.length) return false;
       const groups = new Set(hit.map((i) => i.metadata?.[META]?.group).filter(Boolean));
       const doomed = all.filter(
         (i) => i.createdUserId === me && (groups.has(i.metadata?.[META]?.group) || hit.includes(i))
       );
       await OBR.scene.items.deleteItems(doomed.map((i) => i.id));
       return true;
-    }
-  } catch (_) {}
+    } catch (_) { return false; }
+  };
+  if (await wipeSharedOwn("template")) return true;
+  if (await wipeSharedOwn("pen")) return true;
 
   // painted tiles (local) erase last
   if (await erasePaintAt(p)) return true;
@@ -570,7 +631,8 @@ export async function registerTool() {
   await OBR.tool.createMode(directionalMode("cone", iconUrl("cone.svg"), hexCone, true));
   await OBR.tool.createMode(directionalMode("line", iconUrl("line.svg"), hexLine, false));
   await OBR.tool.createMode(paintMode(iconUrl("paint.svg")));
-  // (Paint colour is chosen from the panel palette — see PAINT_COLORS export.)
+  await OBR.tool.createMode(penMode(iconUrl("pen.svg"))); // freehand draw, no snapping
+  // (Colour is the shared Template Color chosen from the panel — see PAINT_COLORS.)
 
   // white eraser cursor (data-URI SVG) — replaces the red "not-allowed" circle
   const eraseCursor =

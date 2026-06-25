@@ -16,15 +16,8 @@ version in descending order (newest first).
   clears itself after the roll. Finishes the tag automation started in 2.8.4.
 - **Loading / Ordnance tracking** — grey out a Loading weapon's ATK after it
   fires until a Reload action is clicked.
-- **Overcharge button** — rolls the escalating heat cost (1 / 1d3 / 1d6 / 1d6+4)
-  and applies it. Heat cascades now, so it'd be satisfying.
-- **Reactions group** in TECHS — now that PROTOCOLS exists, split reactions out
-  of Quick Tech into their own group.
-- **Mod range/threat into template sizing** — mod-added *damage* and *tags* are
-  honoured; mod-added *range/threat* still isn't merged into the placed template.
 - **Multi-profile weapons** — a profile selector for swappable-ammo weapons
   (currently the first profile is used).
-- **Pilot-scale sheet** — HP, armour, pilot weapons for on-foot scenes.
 - **Structure / Overheat macro buttons** that roll the right dice and read the
   table result into the log.
 
@@ -67,20 +60,40 @@ version in descending order (newest first).
 
 ## Shipped in 2.8.9 ✓
 
-- ✓ **Eraser restored.** A `createAction` call for the paint swatches was throwing
-  and aborting tool registration before the Eraser registered — removed it
-- ✓ **Paint reworked**: colour is chosen from a 6-swatch palette in the MAP tab
-  (which arms the brush); tiles honour the ALL/ME visibility, and are removed by
-  the Eraser, UNDO LAST and CLEAR MY TEMPLATES. New brush icon
-- ✓ **Collapse fixed**: the version is now a flush, invisible tap target (like the
-  logo) and actually shrinks the Owlbear popover (via `OBR.action.setHeight`) down
-  to just the header + tabs, not just the inner content
+- ✓ **Token bars rebuilt diff-based**: each token's bar elements now carry a
+  deterministic id, so a refresh UPDATES them in place and only deletes what's
+  truly gone — no full wipe. This kills the teammate "shows for ~5s then vanishes"
+  bug and the spam-click "cells randomly brighten/dull" glitch (overlapping
+  duplicate fills under rapid re-renders), and drops `attachedTo` entirely
+- ✓ **OVERCHARGE reworked to prime-to-roll**: the orange hex now PRIMES a molten
+  die that you fire with ROLL (no more auto-roll, no top "OVERCHARGE #1" banner).
+  Result reads cleanly — the value in an orange outline with a bold **+N HEAT**
+  line. A **CLEAR OC** button (in the dice mod-row, between HIDDEN and the volume
+  toggle) and right-click both reset the track to base after a full rest
+- ✓ **OVERCHARGE recolors the real deck**: instead of a CSS overlay, `dice3d`
+  washes the whole 3D tray molten red (floor glow, dust, walls, rails, rim light)
+  and flips the back-wall readout from *UNION OMNINET LINK* to **OVERCHARGE —
+  REACTOR CORE UNSTABLE** while the die is primed/rolling
+- ✓ **Dice-picker icons cleaned up**: removed the clashing blue/purple/orange
+  outlines on the ACC / DIF / OC buttons, dulled the OC hex to an easier orange,
+  and swapped the flame for an **O flanked by bars** glyph
+- ✓ **Template Color picker**: Paint's swatches became a *Template Color* button
+  that smoothly drops to reveal the six colours (hidden by default — visible
+  colours broke immersion). The chosen colour now drives **Blast, Cone, Line,
+  Paint AND Pen**. Red default
+- ✓ **Pen tool** (between Paint and Eraser): freehand drawing with NO grid snapping
+  — a single stroke that follows the raw pointer, moderate thickness scaled to the
+  tile size, in the shared Template Color. Honours ALL/ME visibility, erasable and
+  undoable like Paint
+- ✓ **Header + collapse polish**: the version + green dot sit flush right again (a
+  `margin` shorthand had clobbered `margin-left:auto`), and collapsing no longer
+  leaves a stray scrollable sliver under the tabs (the body is fully removed from
+  layout and the popover shrinks to the exact header height)
 - ✓ **Tooltip autoscroll actually works now** — it was stalling because
   `scrollTop += 0.22` floors back to the same integer every frame; switched to a
   float accumulator (hover + pinned, with manual-scroll override)
-- ✓ **Token bars on multiplayer**: add-then-delete kills the flicker, a status
-  poll keeps teammate data fresh, and a transient "token not found" no longer
-  blanks the bars
+- ✓ **Eraser restored.** A `createAction` call for the paint swatches was throwing
+  and aborting tool registration before the Eraser registered — removed it
 - ✓ **FREE ACTIONS + REACTIONS** groups under Protocols (empty-hex glyph): Free →
   Free Actions, Reaction → Reactions, with base Brace/Overwatch. Free/reaction
   WEAPONS (Autogun → Free, Autopod → Reaction) get a plaque while staying in
@@ -88,10 +101,6 @@ version in descending order (newest first).
 - ✓ **Pilot-scale sheet**: the pilot, on foot, is now the last entry in the Active
   Mech list — HP/armour/evasion, pilot weapons, gear-as-systems, same talents,
   straight from the embedded loadout
-- ✓ **OVERCHARGE button** (molten orange hex under DIF): rolls the escalating
-  1 / 1d3 / 1d6 / 1d6+4 cost by use-count, washes the tray molten red, pours the
-  heat in (cascading through Stress). Respects Heatfall Coolant System's 1d6 cap.
-  Right-click resets the counter
 - ✓ Weapon-mod added range/threat now merges into the placed template's size
 
 ## Shipped in 2.8.8 ✓

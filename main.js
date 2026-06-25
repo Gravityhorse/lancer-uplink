@@ -116,23 +116,27 @@ const diceTabActive = () =>
     if (animating) return;
     animating = true;
     const collapsing = !document.body.classList.contains("collapsed");
-    main.style.overflow = "hidden";
-    main.style.maxHeight = main.scrollHeight + "px";
     if (collapsing) {
       // slide the body up, THEN shrink the actual Owlbear popover to the header
       fullHeight = window.innerHeight || fullHeight;
+      main.style.overflow = "hidden";
+      main.style.maxHeight = main.scrollHeight + "px";
       requestAnimationFrame(() => { main.style.maxHeight = "0px"; });
       const onEnd = () => {
         main.removeEventListener("transitionend", onEnd);
         document.body.classList.add("collapsed");
-        setPopover(($("topbar")?.offsetHeight || 80) + 2); // window = just header + tabs
+        main.style.display = "none"; // fully remove from layout — no leftover scroll
+        setPopover($("topbar")?.offsetHeight || 80); // window = exactly header + tabs
         animating = false;
       };
       main.addEventListener("transitionend", onEnd);
     } else {
-      // grow the popover back first, then slide the body open
+      // grow the popover back, restore the body, then slide it open
       setPopover(fullHeight);
+      main.style.display = ""; // un-hide before measuring its height
       document.body.classList.remove("collapsed");
+      main.style.overflow = "hidden";
+      main.style.maxHeight = "0px";
       requestAnimationFrame(() => { main.style.maxHeight = main.scrollHeight + "px"; });
       const onEnd = () => {
         main.removeEventListener("transitionend", onEnd);
@@ -362,86 +366,107 @@ function tokenBarTargets() {
   return out;
 }
 
+// Skewed rhombus cells (matching the pilot HP/Heat UI). Returns the path
+// command lists for the dark track and the lit fill.
+function tbarQuads(left, y, W, H, cells, filled) {
+  const cellW = W / cells, g = cellW * 0.16, skew = H * 0.42, ox = skew / 2;
+  const quad = (i) => {
+    const x0 = left + i * cellW + g + ox, x1 = left + (i + 1) * cellW - g + ox;
+    return [[CMD.MOVE, x0, y + H], [CMD.LINE, x1, y + H], [CMD.LINE, x1 - skew, y], [CMD.LINE, x0 - skew, y], [CMD.CLOSE]];
+  };
+  const track = [], fill = [];
+  for (let i = 0; i < cells; i++) { track.push(...quad(i)); if (i < filled) fill.push(...quad(i)); }
+  return { track, fill };
+}
+function buildTbarItem(id, spec) {
+  const meta = { [META]: { kind: TBAR } };
+  let it;
+  if (spec.kind === "label") {
+    let b = buildLabel().plainText(spec.text).position({ x: spec.x, y: spec.y });
+    const opt = (fn, ...a) => { try { if (typeof b[fn] === "function") b = b[fn](...a); } catch (_) {} };
+    opt("fontSize", spec.fontSize); opt("pointerHeight", 0); opt("pointerWidth", 0);
+    opt("backgroundOpacity", 0); opt("layer", "TEXT"); opt("locked", true); opt("disableHit", true); opt("metadata", meta);
+    it = b.build();
+  } else {
+    it = buildPath().position({ x: 0, y: 0 }).commands(spec.commands)
+      .fillColor(spec.fill).fillOpacity(spec.fillOp).strokeColor("#000000").strokeOpacity(spec.strokeOp).strokeWidth(spec.strokeW)
+      .fillRule("evenodd").layer("PROP").locked(true).disableHit(true).metadata(meta).build();
+  }
+  it.id = id; // deterministic id — the diff updates this item in place, never dupes it
+  return it;
+}
+function applyTbarSpec(it, spec) {
+  if (!spec) return;
+  if (spec.kind === "label") {
+    if (it.text) it.text.plainText = spec.text;
+    it.position = { x: spec.x, y: spec.y };
+  } else {
+    it.commands = spec.commands;
+    if (it.style) {
+      it.style.fillColor = spec.fill; it.style.fillOpacity = spec.fillOp;
+      it.style.strokeOpacity = spec.strokeOp; it.style.strokeWidth = spec.strokeW;
+    }
+  }
+}
+
 let tokenBarsBusy = false, tokenBarsPending = false;
+// DIFF-based render: each token's bar items have deterministic ids, so we ADD
+// new ones, UPDATE existing ones in place, and DELETE only what's truly gone.
+// No full wipe (no flicker / no ~5s vanish) and no duplicate overlapping fills
+// (which was randomly brightening/dulling cells on rapid re-renders).
 async function renderTokenBars() {
   if (!obrReady) return;
-  if (tokenBarsBusy) { tokenBarsPending = true; return; } // serialize rebuilds
+  if (tokenBarsBusy) { tokenBarsPending = true; return; }
   tokenBarsBusy = true;
   try {
+    const existing = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === TBAR);
     if (!tokenBarsOn) {
-      const old = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === TBAR);
-      if (old.length) await OBR.scene.local.deleteItems(old.map((i) => i.id));
+      if (existing.length) await OBR.scene.local.deleteItems(existing.map((i) => i.id));
       return;
     }
+    const existingById = new Map(existing.map((i) => [i.id, i]));
     const targets = tokenBarTargets();
     let tokens = [];
     try { tokens = await OBR.scene.items.getItems(targets.map((t) => t.id)); } catch (_) {}
     const byId = new Map(tokens.map((t) => [t.id, t]));
     const cell = hex.grid.dpi || 150;
-    const meta = { [META]: { kind: TBAR } };
-    const items = [];
+
+    const desired = new Map(); // id -> spec
     for (const t of targets) {
       const tok = byId.get(t.id);
       if (!tok || !tok.position) continue;
-      const foot = cell * (t.size || 1);           // token footprint ≈ size cells
+      const foot = cell * (t.size || 1);
       const W = foot * 0.86, H = Math.max(6, cell * 0.1), gap = cell * 0.03;
       const cx = tok.position.x, left = cx - W / 2; // CENTRED on the token
       const hpY = tok.position.y - foot * 0.5 - cell * 0.16 - H;
       const heatY = hpY + H + gap;
-      const attach = (it) => { it.attachedTo = t.id; it.disableAttachmentBehavior = ["ROTATION", "SCALE", "COPY"]; items.push(it); };
-      // Skewed rhombus cells, matching the pilot HP/Heat UI: a faint dark track
-      // with a black outline, with the first `filled` cells lit in colour.
-      const cellBar = (y, cur, max, color) => {
+      const bar = (key, y, cur, max, color) => {
         const cells = Math.max(1, Math.min(20, Math.round(max)));
         const filled = Math.max(0, Math.min(cells, Math.round((cur / Math.max(1, max)) * cells)));
-        const cellW = W / cells, g = cellW * 0.16, skew = H * 0.42, ox = skew / 2;
-        const quad = (i) => {
-          const x0 = left + i * cellW + g + ox, x1 = left + (i + 1) * cellW - g + ox;
-          return [[CMD.MOVE, x0, y + H], [CMD.LINE, x1, y + H], [CMD.LINE, x1 - skew, y], [CMD.LINE, x0 - skew, y], [CMD.CLOSE]];
-        };
-        const track = [];
-        for (let i = 0; i < cells; i++) track.push(...quad(i));
-        attach(buildPath().position({ x: 0, y: 0 }).commands(track)
-          .fillColor("#0c0e13").fillOpacity(0.5).strokeColor("#000000").strokeOpacity(0.8).strokeWidth(Math.max(1, cell * 0.006))
-          .fillRule("evenodd").layer("PROP").locked(true).disableHit(true).metadata(meta).build());
-        if (filled > 0) {
-          const fillCmds = [];
-          for (let i = 0; i < filled; i++) fillCmds.push(...quad(i));
-          attach(buildPath().position({ x: 0, y: 0 }).commands(fillCmds)
-            .fillColor(color).fillOpacity(0.66).strokeColor("#000000").strokeOpacity(0.45).strokeWidth(Math.max(1, cell * 0.004))
-            .fillRule("evenodd").layer("PROP").locked(true).disableHit(true).metadata(meta).build());
-        }
+        const { track, fill } = tbarQuads(left, y, W, H, cells, filled);
+        desired.set(`lancer-tbar-${t.id}-${key}t`, { kind: "path", commands: track, fill: "#0c0e13", fillOp: 0.5, strokeOp: 0.8, strokeW: Math.max(1, cell * 0.006) });
+        desired.set(`lancer-tbar-${t.id}-${key}f`, { kind: "path", commands: fill.length ? fill : track, fill: color, fillOp: filled ? 0.66 : 0, strokeOp: filled ? 0.45 : 0, strokeW: Math.max(1, cell * 0.004) });
       };
-      cellBar(hpY, t.hp, t.hpMax, "#2196f3");    // blue HP (depletes)
-      cellBar(heatY, t.heat, t.heatMax, "#ff7a1a"); // orange Heat (builds)
-      // exact values only while the token is selected — keeps it subtle
+      bar("hp", hpY, t.hp, t.hpMax, "#2196f3");
+      bar("heat", heatY, t.heat, t.heatMax, "#ff7a1a");
       if (selectedTokens.has(t.id)) {
-        const num = (y, txt) => {
-          let b = buildLabel().plainText(txt).position({ x: cx, y });
-          const opt = (fn, ...a) => { try { if (typeof b[fn] === "function") b = b[fn](...a); } catch (_) {} };
-          opt("fontSize", Math.max(9, cell * 0.072));
-          opt("pointerHeight", 0); opt("pointerWidth", 0);
-          opt("backgroundOpacity", 0); opt("fillOpacity", 0);
-          opt("layer", "TEXT"); opt("locked", true); opt("disableHit", true);
-          opt("metadata", meta);
-          const it = b.build();
-          it.attachedTo = t.id;
-          items.push(it);
-        };
-        num(hpY, `${t.hp}/${t.hpMax}`);
-        num(heatY, `${t.heat}/${t.heatMax}`);
+        const fs = Math.max(9, cell * 0.072);
+        desired.set(`lancer-tbar-${t.id}-hpn`, { kind: "label", text: `${t.hp}/${t.hpMax}`, x: cx, y: hpY, fontSize: fs });
+        desired.set(`lancer-tbar-${t.id}-hen`, { kind: "label", text: `${t.heat}/${t.heatMax}`, x: cx, y: heatY, fontSize: fs });
       }
     }
-    // Add the NEW bars first, THEN remove the previous batch — no empty gap, no
-    // flicker. If we have targets but found none of their tokens this pass (a
-    // transient), keep the last good bars instead of blanking them.
-    const prev = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === TBAR);
-    if (items.length) {
-      await OBR.scene.local.addItems(items);
-      if (prev.length) await OBR.scene.local.deleteItems(prev.map((i) => i.id));
-    } else if (!targets.length && prev.length) {
-      await OBR.scene.local.deleteItems(prev.map((i) => i.id)); // genuinely nothing bonded
+    // If we have targets but found NONE of their tokens (a transient), keep the
+    // last good bars rather than blanking them.
+    if (!desired.size && targets.length) return;
+
+    const toAdd = [], toUpdate = [];
+    for (const [id, spec] of desired) {
+      if (existingById.has(id)) toUpdate.push(id); else toAdd.push(buildTbarItem(id, spec));
     }
+    const toDelete = existing.filter((i) => !desired.has(i.id)).map((i) => i.id);
+    if (toAdd.length) await OBR.scene.local.addItems(toAdd);
+    if (toUpdate.length) await OBR.scene.local.updateItems(toUpdate, (its) => its.forEach((it) => applyTbarSpec(it, desired.get(it.id))));
+    if (toDelete.length) await OBR.scene.local.deleteItems(toDelete);
   } catch (e) {
     console.warn("[LANCER//UPLINK] token bars failed", e);
   } finally {
@@ -1922,19 +1947,21 @@ function recolorDicePicker() {
   document.querySelectorAll('#dicepicker .die-btn[data-die]').forEach((btn) => {
     btn.innerHTML = dieIconSvg(btn.dataset.die, body);
   });
-  // Accuracy: green pointy-top hexagon with a plus. Difficulty: red, minus.
+  // Accuracy: green hex +. Difficulty: red hex −. No outline (it clashed).
   const hexIcon = (color, glyph) => `<svg viewBox="0 0 40 40">
-    <polygon points="20,2 35,11 35,29 20,38 5,29 5,11" fill="${color}" stroke="rgba(255,255,255,0.55)" stroke-width="1.5" stroke-linejoin="round"/>
+    <polygon points="20,2 35,11 35,29 20,38 5,29 5,11" fill="${color}" stroke="none"/>
     <text x="20" y="27" text-anchor="middle" font-size="20" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#ffffff">${glyph}</text>
   </svg>`;
   const acc = $("addadv"), dis = $("adddis");
   if (acc) acc.innerHTML = hexIcon("#2f7d49", "+");
   if (dis) dis.innerHTML = hexIcon("#a32630", "−");
-  // OVERCHARGE — molten orange hex with a flame
+  // OVERCHARGE — duller orange hex, no outline, glyph = O flanked by bars
   const oc = $("addovercharge");
   if (oc) oc.innerHTML = `<svg viewBox="0 0 40 40" aria-label="Overcharge">
-    <polygon points="20,2 35,11 35,29 20,38 5,29 5,11" fill="#ff5e14" stroke="rgba(255,255,255,0.6)" stroke-width="1.5" stroke-linejoin="round"/>
-    <path d="M20 9 C22 14 26 15 24 21 C23 24 25 25 25 27 C25 30 22.5 31.5 20 31.5 C17.5 31.5 15 30 15 27 C15 23 19 22 18 16 C18.8 17 19.5 18 20 19 C20.6 16 19.8 12 20 9 Z" fill="#ffe08a"/>
+    <polygon points="20,2 35,11 35,29 20,38 5,29 5,11" fill="#cc6a30" stroke="none"/>
+    <circle cx="20" cy="20" r="5.2" fill="none" stroke="#fff" stroke-width="2.6"/>
+    <line x1="20" y1="7.5" x2="20" y2="12" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
+    <line x1="20" y1="28" x2="20" y2="32.5" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>
   </svg>`;
 }
 recolorDicePicker(); // initial paint with the default scheme colour
@@ -1963,6 +1990,7 @@ document.querySelectorAll(".die-btn[data-die]").forEach((btn) => {
 $("addadv")?.addEventListener("click", async () => { await ensureDiceTray(); addQueued("d6", "acc"); });
 $("adddis")?.addEventListener("click", async () => { await ensureDiceTray(); addQueued("d6", "dis"); });
 $("cleardice")?.addEventListener("click", () => {
+  if (overchargePrimed) { overchargePrimed = null; diceTray?.setOvercharge?.(false); }
   clearTrayAll();
   clearContext();
   hideResult();
@@ -2052,9 +2080,10 @@ function showResult({ total, sub, kind = "atk", crit = "" }) {
   $("result-sub").textContent = sub || "";
   $("result-crit").textContent = crit;
   const card = $("resultcard");
-  card.classList.remove("dmg", "tech");
+  card.classList.remove("dmg", "tech", "oc");
   if (kind === "dmg") card.classList.add("dmg");
   if (kind === "tech") card.classList.add("tech");
+  if (kind === "oc") card.classList.add("oc");
   $("resultbox").classList.add("show");
 }
 function hideResult() {
@@ -2196,56 +2225,70 @@ function refreshOverchargeBtn() {
   const n = Math.min(live?.overcharge ?? 0, t.length - 1);
   b.title = `OVERCHARGE — next cost ${t[n]} Heat (overcharged ${live?.overcharge ?? 0}× this scene). Right-click to reset.`;
 }
-async function doOvercharge() {
+// Clicking OC PRIMES the molten die (the player then hits ROLL); the tray flips
+// red while it's primed/rolling. No top context popup.
+let overchargePrimed = null; // { flat, asD3, rollsDie, cost }
+async function primeOvercharge() {
   if (!currentMech || !live) return setStatus("Load a pilot first.", "status-err");
   switchToDiceTab();
   if (!(await ensureDiceTray()) || diceBusy) return;
+  const track = overchargeTrack();
+  if (live.overcharge == null) live.overcharge = 0;
+  const cost = track[Math.min(live.overcharge, track.length - 1)];
+  const asD3 = cost === "1d3";
+  const flat = cost === "1d6+4" ? 4 : cost === "1" ? 1 : 0;
+  const rollsDie = cost !== "1";
+  clearTrayAll(); hideResult();
+  overchargePrimed = { flat, asD3, rollsDie, cost };
+  if (rollsDie) addQueued("d6", "oc", asD3 ? "d3" : null);
+  clearContext(); // no "OVERCHARGE #1" banner
+  diceTray.setOvercharge?.(true); // recolour the whole tray red
+  setStatus(`OVERCHARGE primed — ${cost} Heat. Hit ROLL.`, "status-ok");
+}
+async function resolveOvercharge() {
+  if (!overchargePrimed || !diceTray || diceBusy) return;
+  const oc = overchargePrimed;
   diceBusy = true;
   updateAdvCount();
-  const tray = $("dicetray");
   try {
-    const track = overchargeTrack();
-    if (live.overcharge == null) live.overcharge = 0;
-    const n = Math.min(live.overcharge, track.length - 1);
-    const cost = track[n];
-    const asD3 = cost === "1d3";
-    const flat = cost === "1d6+4" ? 4 : cost === "1" ? 1 : 0;
-    const rollsDie = cost !== "1";
-    clearTrayAll(); hideResult();
-    setContext(`OVERCHARGE #${live.overcharge + 1} · ${cost} HEAT`, "dmg", null);
-    tray?.classList.add("molten"); // map aesthetic flips blue → molten red
     let val = 0;
-    if (rollsDie) {
-      diceTray.addDie("d6", "oc");
+    if (oc.rollsDie) {
       const raw = await diceTray.roll(1);
       diceTray.zoomToDice();
       const d = raw && raw[0] ? raw[0].value : 1;
-      val = asD3 ? Math.ceil(d / 2) : d;
+      val = oc.asD3 ? Math.ceil(d / 2) : d;
     } else {
-      await new Promise((r) => setTimeout(r, 350));
+      await new Promise((r) => setTimeout(r, 320));
     }
-    const total = val + flat;
-    showResult({ total, sub: "OVERCHARGE", kind: "dmg", crit: "🔥 HEAT" });
+    const total = val + oc.flat;
+    showResult({ total, sub: "", kind: "oc", crit: `+${total} HEAT` });
     live.overcharge++;
     applyHeat(total); // cascades into Stress if it tips over capacity
     onLiveChanged();
-    const next = overchargeTrack()[Math.min(live.overcharge, track.length - 1)];
-    logRoll({ kind: "sys", title: `OVERCHARGE → +${total} HEAT`, detail: `Cost ${cost}${rollsDie ? ` (rolled ${val})` : ""}. Next overcharge costs ${next}.` });
+    const next = overchargeTrack()[Math.min(live.overcharge, overchargeTrack().length - 1)];
+    logRoll({ kind: "sys", title: `OVERCHARGE → +${total} HEAT`, detail: `Cost ${oc.cost}${oc.rollsDie ? ` (rolled ${val})` : ""}. Next overcharge costs ${next}.` });
     setStatus(`Overcharged: +${total} Heat (now ${live.heat}/${currentMech.stats.heatMax}).`, "status-ok");
     refreshOverchargeBtn();
   } catch (e) {
     console.warn("[LANCER//UPLINK] overcharge failed", e);
   } finally {
+    overchargePrimed = null;
+    trayQueue = []; // the molten die shouldn't ride along into the next roll
     diceBusy = false;
     updateAdvCount();
-    setTimeout(() => tray?.classList.remove("molten"), 1400);
+    setTimeout(() => diceTray.setOvercharge?.(false), 1400);
   }
 }
-$("addovercharge")?.addEventListener("click", doOvercharge);
-$("addovercharge")?.addEventListener("contextmenu", (e) => {
-  e.preventDefault();
-  if (live) { live.overcharge = 0; onLiveChanged(); refreshOverchargeBtn(); setStatus("Overcharge counter reset.", "status-ok"); }
-});
+function resetOvercharge() {
+  if (!live) return;
+  live.overcharge = 0;
+  onLiveChanged();
+  refreshOverchargeBtn();
+  setStatus("Overcharge counter reset to base.", "status-ok");
+}
+$("addovercharge")?.addEventListener("click", primeOvercharge);
+$("addovercharge")?.addEventListener("contextmenu", (e) => { e.preventDefault(); resetOvercharge(); });
+$("clear-oc")?.addEventListener("click", resetOvercharge);
 
 // FIRE: chains the locked weapon's damage right after its accuracy roll.
 // Respects the CRIT and OVERKILL toggles, so a crit confirmed by other means
@@ -2459,7 +2502,7 @@ async function doRoll() {
     // remote rolls replay in their own popup now, so they never wait on us
   }
 }
-$("rolldice")?.addEventListener("click", doRoll);
+$("rolldice")?.addEventListener("click", () => { if (overchargePrimed) resolveOvercharge(); else doRoll(); });
 
 // ---- remote replays: a dedicated right-side popup tray --------------------------
 // Other players' rolls replay in their OWN tray on the right, so they never
@@ -2585,23 +2628,34 @@ $("clearmine")?.addEventListener("click", async () => {
 });
 
 // ---- paint palette: six swatches; click sets the colour and arms the Paint tool
-(function setupPaintPalette() {
-  const wrap = $("paint-palette");
-  if (!wrap || !tool.PAINT_COLORS) return;
-  wrap.innerHTML = "";
+(function setupTemplateColor() {
+  const swatches = $("tplcolor-swatches");
+  const toggle = $("tplcolor-toggle");
+  const drop = $("tplcolor-drop");
+  const dot = $("tplcolor-dot");
+  if (!swatches || !toggle || !drop || !tool.PAINT_COLORS) return;
+  swatches.innerHTML = "";
   tool.PAINT_COLORS.forEach((c, i) => {
     const b = document.createElement("button");
     b.className = "swatch" + (i === 0 ? " sel" : "");
     b.style.background = c.color;
-    b.title = `Paint ${c.key}`;
+    b.title = c.key;
     b.addEventListener("click", () => {
-      tool.setPaintColor(c.color);
-      wrap.querySelectorAll(".swatch").forEach((s) => s.classList.remove("sel"));
+      tool.setPaintColor(c.color); // shared by Blast / Cone / Line / Paint / Pen
+      swatches.querySelectorAll(".swatch").forEach((s) => s.classList.remove("sel"));
       b.classList.add("sel");
-      tool.armPaint();
-      setStatus(`Paint armed (${c.key}). Click/drag the map to highlight tiles.`, "status-ok");
+      if (dot) dot.style.background = c.color;
+      setStatus(`Template colour set to ${c.key}.`, "status-ok");
     });
-    wrap.appendChild(b);
+    swatches.appendChild(b);
+  });
+  // smooth drop reveal — colours stay hidden until the player opens the picker
+  let open = false;
+  toggle.addEventListener("click", () => {
+    open = !open;
+    toggle.classList.toggle("open", open);
+    toggle.setAttribute("aria-expanded", String(open));
+    drop.style.maxHeight = open ? drop.scrollHeight + "px" : "0px";
   });
 })();
 $("clearranges")?.addEventListener("click", async () => {

@@ -495,6 +495,48 @@ export function createDiceTray(container, opts = {}) {
   // ---- animated deco (updated each frame in the loop) -------------------------
   const deco = { dust: null, panelMat: null, railMat: null, t: 0 };
 
+  // back-wall readout — default Union link, or the reactor warning during OC
+  function drawHud(c, over) {
+    c.clearRect(0, 0, 512, 64);
+    if (over) {
+      c.fillStyle = "rgba(30,6,6,0.66)";
+      c.fillRect(0, 0, 512, 64);
+      c.font = "bold 24px 'IBM Plex Mono', monospace";
+      c.fillStyle = "#ff5a3c";
+      c.fillText("OVERCHARGE", 18, 40);
+      c.font = "14px monospace";
+      c.fillStyle = "#ff8a5a";
+      c.fillText("REACTOR CORE UNSTABLE ▮▮▮▮▮", 196, 38);
+    } else {
+      c.fillStyle = "rgba(10,20,28,0.6)";
+      c.fillRect(0, 0, 512, 64);
+      c.font = "bold 26px 'IBM Plex Mono', monospace";
+      c.fillStyle = "#7ee6ff";
+      c.fillText("LANCER//UPLINK", 18, 40);
+      c.font = "14px monospace";
+      c.fillStyle = "#39c2e6";
+      c.fillText("UNION OMNINET ▮▮▮▯▯ LINK STABLE", 290, 38);
+    }
+  }
+  // OVERCHARGE: wash the entire holo-deck molten red (floor glow, dust, walls,
+  // rails, rim light) and flip the wall readout to the reactor warning.
+  function setDeckOvercharge(on) {
+    if (on) {
+      floorMat.color.setHex(0xffb4a4); floorMat.emissive.setHex(0xc21a00);
+      deco.dust?.material.color.setHex(0xff7a4a);
+      if (deco.panelMat) { deco.panelMat.color.setHex(0xee5a44); deco.panelMat.emissive.setHex(0xb02e16); }
+      deco.railMat?.color.setHex(0xff6a4a);
+      deco.rim?.color.setHex(0xff5530);
+    } else {
+      floorMat.color.setHex(0xffffff); floorMat.emissive.setHex(0x2bb7e0);
+      deco.dust?.material.color.setHex(0x8fdcff);
+      if (deco.panelMat) { deco.panelMat.color.setHex(0x55ccee); deco.panelMat.emissive.setHex(0x2aa8cc); }
+      deco.railMat?.color.setHex(0x7ee6ff);
+      deco.rim?.color.setHex(0x66d9ff);
+    }
+    if (deco.hudCtx && deco.hudTex) { drawHud(deco.hudCtx, on); deco.hudTex.needsUpdate = true; }
+  }
+
   // drifting dust motes — slow upward sparkle
   {
     const N = 70;
@@ -553,20 +595,16 @@ export function createDiceTray(container, opts = {}) {
     const rim = new THREE.PointLight(0x66d9ff, 0.5, TRAY * 4);
     rim.position.set(0, 3.5, 0);
     scene.add(rim);
+    deco.rim = rim;
 
-    // back-wall HUD strip: flickering "UNION OMNINET" readout
+    // back-wall HUD strip — the readout that flips to a reactor warning on OC
     const hud = document.createElement("canvas");
     hud.width = 512; hud.height = 64;
     const hctx = hud.getContext("2d");
-    hctx.fillStyle = "rgba(10,20,28,0.6)";
-    hctx.fillRect(0, 0, 512, 64);
-    hctx.font = "bold 26px 'IBM Plex Mono', monospace";
-    hctx.fillStyle = "#7ee6ff";
-    hctx.fillText("LANCER//UPLINK", 18, 40);
-    hctx.fillStyle = "#39c2e6";
-    hctx.font = "14px monospace";
-    hctx.fillText("UNION OMNINET ▮▮▮▯▯ LINK STABLE", 290, 38);
+    deco.hudCtx = hctx;
+    drawHud(hctx, false); // default UNION OMNINET LINK
     const hudTex = new THREE.CanvasTexture(hud);
+    deco.hudTex = hudTex;
     // steady glow — no flicker
     const holoMat = new THREE.MeshBasicMaterial({
       map: hudTex, transparent: true, opacity: 0.7,
@@ -1126,6 +1164,7 @@ export function createDiceTray(container, opts = {}) {
   return {
     addDie, addAccDie, hideDie, clearTray, listDice, roll, rollExtra, replay,
     zoomToDice, resetCamera, stageView, resize, dispose,
+    setOvercharge: (on) => setDeckOvercharge(!!on),
     count: () => dice.length,
     isRolling: () => rolling,
   };
