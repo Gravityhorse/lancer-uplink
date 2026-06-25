@@ -12,7 +12,7 @@
 //
 // Lancer rules note: GRIT applies to attack rolls only, never to damage.
 
-import { OBR, CH_ROLL3D, CH_STATUS, META, buildShape, buildLabel } from "./sdk.js";
+import { OBR, CH_ROLL3D, CH_STATUS, META, buildShape, buildLabel, buildPath, Command } from "./sdk.js";
 import * as hex from "./hex.js";
 import * as tool from "./tool.js";
 import {
@@ -101,6 +101,33 @@ document.querySelectorAll("nav.tabs button").forEach((btn) => {
 });
 const diceTabActive = () =>
   document.getElementById("tab-dice")?.classList.contains("active");
+
+// ---- collapse / expand (mobile): tap the version to fold the panel down to
+// just the header + tabs, sliding smoothly. Overflow is only clamped during the
+// animation so the sticky ROLL button still works when fully expanded.
+(function setupCollapse() {
+  const main = $("player-main");
+  const ver = $("verbtn");
+  if (!main || !ver) return;
+  let animating = false;
+  ver.addEventListener("click", () => {
+    if (animating) return;
+    animating = true;
+    const collapsing = !document.body.classList.contains("collapsed");
+    main.style.overflow = "hidden";
+    main.style.maxHeight = main.scrollHeight + "px";
+    const onEnd = () => {
+      main.removeEventListener("transitionend", onEnd);
+      animating = false;
+      if (!collapsing) { main.style.maxHeight = ""; main.style.overflow = ""; } // restore sticky
+    };
+    main.addEventListener("transitionend", onEnd);
+    requestAnimationFrame(() => {
+      document.body.classList.toggle("collapsed", collapsing);
+      main.style.maxHeight = collapsing ? "0px" : main.scrollHeight + "px";
+    });
+  });
+})();
 
 function switchToDiceTab() {
   document.querySelector('nav.tabs button[data-tab="dice"]')?.click();
@@ -299,6 +326,7 @@ async function pingToken(tokenId) {
 let tokenBarsOn = false;
 let selectedTokens = new Set();
 const TBAR = "tokenbar";
+const CMD = { MOVE: Command?.MOVE ?? 0, LINE: Command?.LINE ?? 1, CLOSE: Command?.CLOSE ?? 4 };
 
 // [{ id, hp, hpMax, heat, heatMax, size }] for every bonded token we know about
 function tokenBarTargets() {
@@ -340,24 +368,36 @@ async function renderTokenBars() {
       const tok = byId.get(t.id);
       if (!tok || !tok.position) continue;
       const foot = cell * (t.size || 1);           // token footprint ≈ size cells
-      const W = foot * 0.86, H = Math.max(5, cell * 0.085), gap = cell * 0.028;
-      const cx = tok.position.x, left = cx - W / 2;
-      const hpY = tok.position.y - foot * 0.5 - cell * 0.16 - H; // sit just above
+      const W = foot * 0.86, H = Math.max(6, cell * 0.1), gap = cell * 0.03;
+      const cx = tok.position.x, left = cx - W / 2; // CENTRED on the token
+      const hpY = tok.position.y - foot * 0.5 - cell * 0.16 - H;
       const heatY = hpY + H + gap;
-      const sw = Math.max(1, cell * 0.006);
       const attach = (it) => { it.attachedTo = t.id; it.disableAttachmentBehavior = ["ROTATION", "SCALE", "COPY"]; items.push(it); };
-      const bar = (y, pct, color) => {
-        // dark-grey track with a light-grey border (shows through where depleted)
-        attach(buildShape().shapeType("RECTANGLE").position({ x: cx, y }).width(W).height(H)
-          .fillColor("#1b1e25").fillOpacity(0.82).strokeColor("#aab3c0").strokeOpacity(0.75).strokeWidth(sw)
-          .layer("PROP").locked(true).disableHit(true).metadata(meta).build());
-        const fw = Math.max(0, Math.min(1, pct)) * W;   // percentage fill, left-anchored
-        if (fw > 0.5) attach(buildShape().shapeType("RECTANGLE").position({ x: left + fw / 2, y }).width(fw).height(H)
-          .fillColor(color).fillOpacity(0.95).strokeOpacity(0).strokeWidth(0)
-          .layer("PROP").locked(true).disableHit(true).metadata(meta).build());
+      // Skewed rhombus cells, matching the pilot HP/Heat UI: a faint dark track
+      // with a black outline, with the first `filled` cells lit in colour.
+      const cellBar = (y, cur, max, color) => {
+        const cells = Math.max(1, Math.min(20, Math.round(max)));
+        const filled = Math.max(0, Math.min(cells, Math.round((cur / Math.max(1, max)) * cells)));
+        const cellW = W / cells, g = cellW * 0.16, skew = H * 0.42, ox = skew / 2;
+        const quad = (i) => {
+          const x0 = left + i * cellW + g + ox, x1 = left + (i + 1) * cellW - g + ox;
+          return [[CMD.MOVE, x0, y + H], [CMD.LINE, x1, y + H], [CMD.LINE, x1 - skew, y], [CMD.LINE, x0 - skew, y], [CMD.CLOSE]];
+        };
+        const track = [];
+        for (let i = 0; i < cells; i++) track.push(...quad(i));
+        attach(buildPath().position({ x: 0, y: 0 }).commands(track)
+          .fillColor("#0c0e13").fillOpacity(0.5).strokeColor("#000000").strokeOpacity(0.8).strokeWidth(Math.max(1, cell * 0.006))
+          .fillRule("evenodd").layer("PROP").locked(true).disableHit(true).metadata(meta).build());
+        if (filled > 0) {
+          const fillCmds = [];
+          for (let i = 0; i < filled; i++) fillCmds.push(...quad(i));
+          attach(buildPath().position({ x: 0, y: 0 }).commands(fillCmds)
+            .fillColor(color).fillOpacity(0.66).strokeColor("#000000").strokeOpacity(0.45).strokeWidth(Math.max(1, cell * 0.004))
+            .fillRule("evenodd").layer("PROP").locked(true).disableHit(true).metadata(meta).build());
+        }
       };
-      bar(hpY, t.hp / t.hpMax, "#2196f3");   // blue HP (depletes)
-      bar(heatY, t.heat / t.heatMax, "#ff7a1a"); // orange Heat (builds)
+      cellBar(hpY, t.hp, t.hpMax, "#2196f3");    // blue HP (depletes)
+      cellBar(heatY, t.heat, t.heatMax, "#ff7a1a"); // orange Heat (builds)
       // exact values only while the token is selected — keeps it subtle
       if (selectedTokens.has(t.id)) {
         const num = (y, txt) => {
@@ -389,6 +429,8 @@ function setTokenBars(on) {
   tokenBarsOn = !!on;
   const cb = $("tokenbars-toggle");
   if (cb) cb.checked = tokenBarsOn;
+  // ask every other client to report in so their bonded tokens get bars too
+  if (tokenBarsOn) requestSquadStatus();
   renderTokenBars();
   saveState();
 }
@@ -1658,11 +1700,16 @@ function pinTip() {
   if (tipEl.style.display !== "block") return;
   tipPinned = true;
   tipEl.classList.add("pinned");
-  // A pinned tooltip is hand-scrollable (themed scrollbar) — stop the auto
-  // hover-scroll so the two don't fight over scrollTop.
-  stopTipScroll();
+  // A pinned tooltip keeps auto-scrolling long text; a manual scroll (wheel or
+  // touch, wired below) cancels the autoscroll and hands control to the player.
+}
+
+// cancel the autoscroll WITHOUT snapping scrollTop back — for manual override
+function cancelTipAutoScroll() {
+  cancelAnimationFrame(tipScrollRaf);
+  clearTimeout(tipScrollTimer);
   const b = $("tt-body");
-  if (b) b.scrollTop = 0;
+  if (b) b.style.opacity = "1";
 }
 
 $("tt-close")?.addEventListener("click", (e) => {
@@ -1672,6 +1719,10 @@ $("tt-close")?.addEventListener("click", (e) => {
   tipEl.style.display = "none";
   stopTipScroll();
 });
+// a manual scroll on a pinned tooltip overrides (cancels) the autoscroll
+["wheel", "touchmove"].forEach((ev) =>
+  $("tt-body")?.addEventListener(ev, () => { if (tipPinned) cancelTipAutoScroll(); }, { passive: true })
+);
 
 // clicking a chip (re)pins its tooltip — even if another tip is already pinned
 function clickPin(head, body, ev) {
@@ -2704,7 +2755,7 @@ async function start() {
       barTimer = setTimeout(renderTokenBars, 250);
     });
   } catch (_) {}
-  if (tokenBarsOn) renderTokenBars();
+  if (tokenBarsOn) { requestSquadStatus(); renderTokenBars(); }
 
   broadcastStatus();
 }

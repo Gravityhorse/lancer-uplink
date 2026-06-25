@@ -65,6 +65,26 @@ version in descending order (newest first).
 
 ---
 
+## Shipped in 2.8.8 ✓
+
+- ✓ **Token bars reworked to rhombus cells** matching the pilot HP/Heat UI — a
+  faint dark track with black outlines, the first N cells lit; the bar is now
+  CENTRED on the token (was hanging off the right edge)
+- ✓ Enabling the bars now requests every client's status, so **other players'**
+  bonded tokens show bars too (disabled = none, enabled = all)
+- ✓ **Mobile collapse**: tap the version (top-right) to fold the panel down to
+  just the header + tabs and back, with a smooth slide and a generous hitbox;
+  plus tap-highlight/touch-action polish
+- ✓ **Paint tool** added to the LANCER templates (brush icon): freely highlight
+  tiles in the holographic style. A six-colour sub-palette (Red/Blue/Green/
+  Orange/Purple/Yellow) appears only while Paint is active. Paint is its own
+  layer (kind:"paint") — it never touches Sensors/Move/Range. The Eraser removes
+  it
+- ✓ **Eraser auto-swaps to Move** when a click erases nothing
+- ✓ Tooltip autoscroll re-enabled (including on pinned tooltips); a manual
+  wheel/touch scroll overrides it
+- ✓ Trimmed the token-bars tutorial line in House Rules
+
 ## Shipped in 2.8.7 ✓
 
 - ✓ **d10 / d12 faces fixed**: the old rounded-normal grouping mis-counted faces

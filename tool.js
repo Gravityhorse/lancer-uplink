@@ -37,8 +37,24 @@ export const MODES = {
   blast: `${ID}/mode-blast`,
   cone: `${ID}/mode-cone`,
   line: `${ID}/mode-line`,
+  paint: `${ID}/mode-paint`,
   erase: `${ID}/mode-erase`,
 };
+
+// Paint palette — exclusive to the Paint tool (kind:"paint"), so it can never be
+// confused with the Move/Sensors/Range/weapon overlays.
+const PAINT_COLORS = [
+  { key: "red", color: "#d22f3d" },
+  { key: "blue", color: "#3da5ff" },
+  { key: "green", color: "#5ad17a" },
+  { key: "orange", color: "#ff8a3d" },
+  { key: "purple", color: "#b07ee6" },
+  { key: "yellow", color: "#ffd34d" },
+];
+let paintColor = PAINT_COLORS[0].color;
+// data-URI swatch icon (a filled colour disc with a white ring)
+const swatchIcon = (c) =>
+  `data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='8' fill='${c}' stroke='white' stroke-width='2'/></svg>`)}`;
 
 const COLORS = {
   move: "#5ad17a",
@@ -385,9 +401,61 @@ function directionalMode(shape, icon, fn, snap) {
   };
 }
 
+// ---- paint (free tile highlighting) -------------------------------------------
+// Local items only (kind:"paint") so they never touch the Move/Sensors/Range
+// overlays or the shared scene. Painted in the active palette colour.
+const painted = new Map(); // hexKey -> { id, color }
+
+async function paintTile(h) {
+  const key = `${h.q},${h.r}`;
+  const cur = painted.get(key);
+  if (cur && cur.color === paintColor) return; // already this colour
+  try {
+    if (cur) await OBR.scene.local.deleteItems([cur.id]);
+    const item = buildHexOverlay([h], {
+      color: paintColor, fillOpacity: 0.3, strokeOpacity: 0.7, strokeWidth: 2,
+      name: "Paint", kind: "paint", layer: "DRAWING",
+    });
+    await OBR.scene.local.addItems([item]);
+    painted.set(key, { id: item.id, color: paintColor });
+  } catch (_) {}
+}
+
+async function erasePaintAt(p) {
+  try {
+    const radius = Math.max(60, (grid.square ? grid.S : grid.R * 1.9) * 1.2);
+    const all = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === "paint");
+    const hit = all.filter((i) => (i.commands || []).some((c) => c[0] === 0 && Math.hypot(c[1] - p.x, c[2] - p.y) < radius));
+    if (!hit.length) return false;
+    await OBR.scene.local.deleteItems(hit.map((i) => i.id));
+    const ids = new Set(hit.map((i) => i.id));
+    for (const [k, v] of [...painted]) if (ids.has(v.id)) painted.delete(k);
+    return true;
+  } catch (_) { return false; }
+}
+
+let paintBusy = false;
+async function paintAt(p) {
+  if (paintBusy) return;
+  paintBusy = true;
+  try { await paintTile(pixelToHex(p)); } finally { paintBusy = false; }
+}
+
+function paintMode(icon) {
+  return {
+    id: MODES.paint,
+    icons: [{ icon, label: "Paint", filter: { activeTools: [TOOL] } }],
+    cursors: [{ cursor: "crosshair" }],
+    async onToolClick(_ctx, ev) { await paintAt(ev.pointerPosition); },
+    async onToolDragStart(_ctx, ev) { await paintAt(ev.pointerPosition); },
+    async onToolDragMove(_ctx, ev) { await paintAt(ev.pointerPosition); },
+  };
+}
+
 // ---- eraser (group-aware) ------------------------------------------------------------------
 // Removes the WHOLE template group (path + label + origin marker) of whatever
-// you click. Range fields are untouchable here — clear those from the panel.
+// you click, plus painted tiles. Range fields are cleared from the panel.
+// Returns true if it removed anything (the mode auto-swaps to Move otherwise).
 async function eraseAt(p) {
   const radius = Math.max(60, (grid.square ? grid.S : grid.R * 1.9) * 1.2);
   const near = (i) => {
@@ -427,6 +495,9 @@ async function eraseAt(p) {
       return true;
     }
   } catch (_) {}
+
+  // painted tiles (local) erase last
+  if (await erasePaintAt(p)) return true;
   return false;
 }
 
@@ -452,6 +523,17 @@ export async function registerTool() {
   await OBR.tool.createMode(blastMode(iconUrl("blast.svg")));
   await OBR.tool.createMode(directionalMode("cone", iconUrl("cone.svg"), hexCone, true));
   await OBR.tool.createMode(directionalMode("line", iconUrl("line.svg"), hexLine, false));
+  await OBR.tool.createMode(paintMode(iconUrl("paint.svg")));
+
+  // PAINT palette: six colour actions that only appear while Paint is active.
+  for (const { key, color } of PAINT_COLORS) {
+    await OBR.tool.createAction({
+      id: `${TOOL}-paint-${key}`,
+      icons: [{ icon: swatchIcon(color), label: key[0].toUpperCase() + key.slice(1),
+        filter: { activeTools: [TOOL], activeModes: [MODES.paint] } }],
+      onClick: () => { paintColor = color; },
+    });
+  }
 
   // white eraser cursor (data-URI SVG) — replaces the red "not-allowed" circle
   const eraseCursor =
@@ -461,7 +543,9 @@ export async function registerTool() {
     icons: [{ icon: iconUrl("erase.svg"), label: "Erase", filter: { activeTools: [TOOL] } }],
     cursors: [{ cursor: eraseCursor }],
     async onToolClick(_ctx, ev) {
-      await eraseAt(ev.pointerPosition);
+      // erase what's under the click; if nothing was there, drop to Move mode
+      const did = await eraseAt(ev.pointerPosition);
+      if (!did) { try { await OBR.tool.activateMode(MODES.move); } catch (_) {} }
     },
   });
 
