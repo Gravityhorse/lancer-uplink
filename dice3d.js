@@ -39,6 +39,8 @@ export const SCHEMES = {
 // royal purple with white numbers. Engraved in silver, gem-facet pattern.
 const ACC = { body: "#1842e6", num: "#ffd76a", emissive: "#0a2a8c", trace: "#ffe08a", engStyle: "gem" };
 const DIS = { body: "#6a18d8", num: "#ffffff", emissive: "#2c0a68", trace: "#dcb8ff", engStyle: "gem" };
+// OVERCHARGE — a molten orange crystal, glowing like a tapped reactor.
+const OC = { body: "#ff5e14", num: "#fff3d6", emissive: "#a02400", trace: "#ffd9a0", engStyle: "gem" };
 
 // Die geometry + which face is read after settling.
 const DIE = {
@@ -607,6 +609,7 @@ export function createDiceTray(container, opts = {}) {
     const scheme = getScheme();
     if (role === "acc") return ACC;
     if (role === "dis") return DIS;
+    if (role === "oc") return OC;
     return scheme;
   }
 

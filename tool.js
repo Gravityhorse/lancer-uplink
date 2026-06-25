@@ -20,6 +20,7 @@ import {
   snapAngle,
   hexToPixel,
   hexDistance,
+  hexKey,
   grid,
 } from "./hex.js";
 import {
@@ -41,20 +42,24 @@ export const MODES = {
   erase: `${ID}/mode-erase`,
 };
 
-// Paint palette — exclusive to the Paint tool (kind:"paint"), so it can never be
-// confused with the Move/Sensors/Range/weapon overlays.
-const PAINT_COLORS = [
-  { key: "red", color: "#d22f3d" },
-  { key: "blue", color: "#3da5ff" },
-  { key: "green", color: "#5ad17a" },
-  { key: "orange", color: "#ff8a3d" },
-  { key: "purple", color: "#b07ee6" },
-  { key: "yellow", color: "#ffd34d" },
+// Paint palette — exclusive to the Paint tool (kind:"paint"/"paint-local"), so
+// it can never be confused with the Move/Sensors/Range/weapon overlays. The
+// colour is chosen from the panel (the Owlbear-toolbar action approach broke
+// tool registration), so these are exported for the panel to render.
+export const PAINT_COLORS = [
+  { key: "Red", color: "#d22f3d" },
+  { key: "Blue", color: "#3da5ff" },
+  { key: "Green", color: "#5ad17a" },
+  { key: "Orange", color: "#ff8a3d" },
+  { key: "Purple", color: "#b07ee6" },
+  { key: "Yellow", color: "#ffd34d" },
 ];
 let paintColor = PAINT_COLORS[0].color;
-// data-URI swatch icon (a filled colour disc with a white ring)
-const swatchIcon = (c) =>
-  `data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='8' fill='${c}' stroke='white' stroke-width='2'/></svg>`)}`;
+export const getPaintColor = () => paintColor;
+export function setPaintColor(c) { paintColor = c; }
+export async function armPaint() {
+  try { await OBR.tool.activateTool(TOOL); await OBR.tool.activateMode(MODES.paint); } catch (_) {}
+}
 
 const COLORS = {
   move: "#5ad17a",
@@ -103,7 +108,12 @@ export async function undoLastTemplate() {
   try {
     const api = entry.local ? OBR.scene.local : OBR.scene.items;
     const items = await api.getItems((i) => i.metadata?.[META]?.group === entry.group);
-    if (items.length) await api.deleteItems(items.map((i) => i.id));
+    if (items.length) {
+      await api.deleteItems(items.map((i) => i.id));
+      // a paint stroke shares this group — forget those tiles so they repaint
+      const ids = new Set(items.map((i) => i.id));
+      for (const [k, v] of [...painted]) if (ids.has(v.id)) painted.delete(k);
+    }
     return true;
   } catch (_) {
     return false;
@@ -402,43 +412,77 @@ function directionalMode(shape, icon, fn, snap) {
 }
 
 // ---- paint (free tile highlighting) -------------------------------------------
-// Local items only (kind:"paint") so they never touch the Move/Sensors/Range
-// overlays or the shared scene. Painted in the active palette colour.
-const painted = new Map(); // hexKey -> { id, color }
+// Painted tiles honour the templates ALL/ME visibility (shared items when ALL,
+// local when ME), carry their own kind so they never touch Move/Sensors/Range,
+// are erasable, undoable (per stroke) and clearable. Painted in the palette colour.
+const painted = new Map(); // hexKey -> { id, color, local }
+let paintStrokeGroup = null;
+let paintChain = Promise.resolve(); // serialise paints so a drag never races
+
+const paintApi = (local) => (local ? OBR.scene.local : OBR.scene.items);
 
 async function paintTile(h) {
-  const key = `${h.q},${h.r}`;
+  const key = hexKey(h);
   const cur = painted.get(key);
   if (cur && cur.color === paintColor) return; // already this colour
+  const local = templateVisibility === "me";
+  const group = paintStrokeGroup || `paint-${Date.now()}-${++groupSeq}`;
   try {
-    if (cur) await OBR.scene.local.deleteItems([cur.id]);
+    if (cur) { try { await paintApi(cur.local).deleteItems([cur.id]); } catch (_) {} }
     const item = buildHexOverlay([h], {
       color: paintColor, fillOpacity: 0.3, strokeOpacity: 0.7, strokeWidth: 2,
-      name: "Paint", kind: "paint", layer: "DRAWING",
+      name: "Paint", kind: local ? "paint-local" : "paint", layer: "DRAWING",
+      extra: { group },
     });
-    await OBR.scene.local.addItems([item]);
-    painted.set(key, { id: item.id, color: paintColor });
+    await paintApi(local).addItems([item]);
+    painted.set(key, { id: item.id, color: paintColor, local });
   } catch (_) {}
 }
+const paintAt = (p) => { paintChain = paintChain.then(() => paintTile(pixelToHex(p))).catch(() => {}); return paintChain; };
 
-async function erasePaintAt(p) {
-  try {
-    const radius = Math.max(60, (grid.square ? grid.S : grid.R * 1.9) * 1.2);
-    const all = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === "paint");
-    const hit = all.filter((i) => (i.commands || []).some((c) => c[0] === 0 && Math.hypot(c[1] - p.x, c[2] - p.y) < radius));
-    if (!hit.length) return false;
-    await OBR.scene.local.deleteItems(hit.map((i) => i.id));
-    const ids = new Set(hit.map((i) => i.id));
-    for (const [k, v] of [...painted]) if (ids.has(v.id)) painted.delete(k);
-    return true;
-  } catch (_) { return false; }
+function startPaintStroke() { paintStrokeGroup = `paint-${Date.now()}-${++groupSeq}`; }
+function finishPaintStroke() {
+  if (paintStrokeGroup) {
+    undoStack.push({ local: templateVisibility === "me", group: paintStrokeGroup });
+    if (undoStack.length > 40) undoStack.shift();
+    paintStrokeGroup = null;
+  }
 }
 
-let paintBusy = false;
-async function paintAt(p) {
-  if (paintBusy) return;
-  paintBusy = true;
-  try { await paintTile(pixelToHex(p)); } finally { paintBusy = false; }
+const cleanPainted = (hit) => {
+  const ids = new Set(hit.map((i) => i.id));
+  for (const [k, v] of [...painted]) if (ids.has(v.id)) painted.delete(k);
+};
+
+async function erasePaintAt(p) {
+  const radius = Math.max(60, (grid.square ? grid.S : grid.R * 1.9) * 1.2);
+  const near = (i) => (i.commands || []).some((c) => c[0] === 0 && Math.hypot(c[1] - p.x, c[2] - p.y) < radius);
+  let did = false;
+  try {
+    const loc = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === "paint-local");
+    const hit = loc.filter(near);
+    if (hit.length) { await OBR.scene.local.deleteItems(hit.map((i) => i.id)); cleanPainted(hit); did = true; }
+  } catch (_) {}
+  try {
+    const me = await OBR.player.getId();
+    const sh = await OBR.scene.items.getItems((i) => i.metadata?.[META]?.kind === "paint" && i.createdUserId === me);
+    const hit = sh.filter(near);
+    if (hit.length) { await OBR.scene.items.deleteItems(hit.map((i) => i.id)); cleanPainted(hit); did = true; }
+  } catch (_) {}
+  return did;
+}
+
+export async function clearMyPaint() {
+  painted.clear();
+  try {
+    const loc = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === "paint-local");
+    if (loc.length) await OBR.scene.local.deleteItems(loc.map((i) => i.id));
+  } catch (_) {}
+  try {
+    const me = await OBR.player.getId();
+    const sh = await OBR.scene.items.getItems((i) => i.metadata?.[META]?.kind === "paint" && i.createdUserId === me);
+    if (sh.length) await OBR.scene.items.deleteItems(sh.map((i) => i.id));
+  } catch (_) {}
 }
 
 function paintMode(icon) {
@@ -446,9 +490,11 @@ function paintMode(icon) {
     id: MODES.paint,
     icons: [{ icon, label: "Paint", filter: { activeTools: [TOOL] } }],
     cursors: [{ cursor: "crosshair" }],
-    async onToolClick(_ctx, ev) { await paintAt(ev.pointerPosition); },
-    async onToolDragStart(_ctx, ev) { await paintAt(ev.pointerPosition); },
+    async onToolClick(_ctx, ev) { startPaintStroke(); await paintAt(ev.pointerPosition); finishPaintStroke(); },
+    async onToolDragStart(_ctx, ev) { startPaintStroke(); await paintAt(ev.pointerPosition); },
     async onToolDragMove(_ctx, ev) { await paintAt(ev.pointerPosition); },
+    onToolDragEnd() { finishPaintStroke(); },
+    onToolDragCancel() { finishPaintStroke(); },
   };
 }
 
@@ -524,16 +570,7 @@ export async function registerTool() {
   await OBR.tool.createMode(directionalMode("cone", iconUrl("cone.svg"), hexCone, true));
   await OBR.tool.createMode(directionalMode("line", iconUrl("line.svg"), hexLine, false));
   await OBR.tool.createMode(paintMode(iconUrl("paint.svg")));
-
-  // PAINT palette: six colour actions that only appear while Paint is active.
-  for (const { key, color } of PAINT_COLORS) {
-    await OBR.tool.createAction({
-      id: `${TOOL}-paint-${key}`,
-      icons: [{ icon: swatchIcon(color), label: key[0].toUpperCase() + key.slice(1),
-        filter: { activeTools: [TOOL], activeModes: [MODES.paint] } }],
-      onClick: () => { paintColor = color; },
-    });
-  }
+  // (Paint colour is chosen from the panel palette — see PAINT_COLORS export.)
 
   // white eraser cursor (data-URI SVG) — replaces the red "not-allowed" circle
   const eraseCursor =

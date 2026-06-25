@@ -187,6 +187,8 @@ export function parsePilot(p) {
     coreBonuses: (p.core_bonuses || p.corebonuses || [])
       .map((c) => (typeof c === "string" ? c : c?.id || ""))
       .filter(Boolean),
+    // the pilot's personal loadout (armour / weapons / gear) for the on-foot sheet
+    loadout: p.loadout || null,
   };
 
   const mechs = (p.mechs || []).map((m) => {
@@ -358,6 +360,46 @@ export function resolveMech(mechRaw, pilot) {
   return { name: mechRaw.name, stats, mounts, systems, coreBonuses, frameTraits, current: mechRaw.current, frame };
 }
 
+// On-foot pilot sheet — a mech-shaped object built from the pilot's own loadout
+// (armour / weapons / gear), so it renders through the exact same path.
+export function resolvePilotScale(pilot) {
+  const lo = pilot.loadout || {};
+  const armors = (lo.armor || []).map(normEquip).filter((a) => a && (a.id || a.data));
+  const weapons = [...(lo.weapons || []), ...(lo.extendedWeapons || [])]
+    .map(normEquip).filter((w) => w && (w.id || w.data));
+  const gear = [...(lo.gear || []), ...(lo.extendedGear || [])]
+    .map(normEquip).filter((g) => g && (g.id || g.data));
+
+  // Base pilot stats; worn armour overrides Armour/Evasion/E-Def/Speed and adds HP.
+  let hp = 6, armor = 0, evasion = 10, edef = 10, speed = 4, size = 0.5;
+  for (const a of armors) {
+    const d = a.data; if (!d) continue;
+    hp += Number(d.hp_bonus ?? 0);
+    if (d.armor != null) armor = Number(d.armor);
+    if (d.evasion != null) evasion = Number(d.evasion);
+    if (d.edef != null) edef = Number(d.edef);
+    if (d.speed != null) speed = Number(d.speed);
+    if (d.size != null) size = Number(d.size);
+  }
+
+  const stats = {
+    frameName: `${pilot.callsign || "PILOT"} · ON FOOT`,
+    size, hpMax: Math.max(1, hp), armor,
+    structureMax: 0, stressMax: 0, heatMax: 0, repMax: 0, coreMax: 0,
+    evasion, edef, speed, sensors: 5,
+    techAttack: 0, techAccuracy: 0, save: 10 + pilot.grit, attackBonus: pilot.grit,
+  };
+  const mounts = weapons.length
+    ? [{ label: "PILOT WEAPONS", weapons: weapons.map(resolveWeapon).filter(Boolean) }]
+    : [];
+  const systems = gear.map(resolveSystem).filter(Boolean);
+  return {
+    name: `${pilot.name || "Pilot"} (On Foot)`,
+    stats, mounts, systems, coreBonuses: [], frameTraits: [],
+    current: {}, frame: null, isPilot: true,
+  };
+}
+
 // pilot core-bonus ids → [{ id, name, source, effect, description, bonuses }]
 export function resolveCoreBonuses(ids) {
   return (ids || []).map((id) => {
@@ -510,6 +552,7 @@ export function resolveMod(ref) {
     sp: data.sp ?? null,
     effect: [effectText(data.effect), effectText(data.description)].filter(Boolean).join("  •  "),
     addedDamage: Array.isArray(data.added_damage) ? data.added_damage : [],
+    addedRange: Array.isArray(data.added_range) ? data.added_range : [],
     addedTags: (data.added_tags || []).map((t) => t.id || t),
     rawAddedTags: Array.isArray(data.added_tags) ? data.added_tags : [],
     actions: (Array.isArray(data.actions) ? data.actions : []).map((a) => ({
@@ -548,8 +591,20 @@ export function resolveWeapon(ref) {
     else if (t === "line") line = v;
     else if (t === "burst") burst = v;
   }
-  // A weapon mod can add damage dice and tags — fold both in.
+  // A weapon mod can add damage dice, tags AND range — fold them all in.
   const mod = resolveMod(r.mod);
+  if (mod && mod.addedRange.length) {
+    for (const rg of mod.addedRange) {
+      const v = Number(rg.val) || 0;
+      const t = String(rg.type || "").toLowerCase();
+      if (t === "range") range += v;
+      else if (t === "threat") threat += v;
+      else if (t === "blast") blast += v;
+      else if (t === "cone") cone += v;
+      else if (t === "line") line += v;
+      else if (t === "burst") burst += v;
+    }
+  }
   const dmgList = [...(w.damage || []), ...(mod ? mod.addedDamage : [])];
   const damage = dmgList
     .map((d) => `${d.val ?? d.override ?? "?"} ${String(d.type || "").slice(0, 3)}`)
@@ -579,8 +634,15 @@ export function resolveWeapon(ref) {
     accurate: tags.includes("tg_accurate"),
     inaccurate: tags.includes("tg_inaccurate"),
     reliable,
-    // free/reactionary weapons get an empty-hex action icon (Autopod, Autogun…)
-    free: /autopod|autogun|free action|as a reaction/i.test(`${w.name || ""} ${effectText(w.effect)}`),
+    // free / reactionary weapons get an empty-hex icon and a plaque in the TECHS
+    // tab: Autopod fires as a Reaction, Autogun as a Free action.
+    free: /autopod|autogun|free action|as a free|as a reaction/i.test(`${w.name || ""} ${effectText(w.effect)}`),
+    freeKind: (() => {
+      const s = `${w.name || ""} ${effectText(w.effect)}`.toLowerCase();
+      if (/autopod|as a reaction|\breaction\b/.test(s)) return "reaction";
+      if (/autogun|free action|as a free/.test(s)) return "free";
+      return null;
+    })(),
     mod,
     tagNames,
     effect,

@@ -42,10 +42,10 @@
       header h1 { font-size: 15px; letter-spacing: 3px; margin: 0; font-weight: 700; user-select: none; }
       header h1 .slash { color: var(--crimson); }
       header h1.gm .slash { color: var(--tech); }
-      .ver { margin-left: auto; font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: 1px; cursor: pointer; padding: 7px 8px; margin-top: -7px; margin-bottom: -7px; border-radius: 4px; user-select: none; white-space: nowrap; -webkit-tap-highlight-color: transparent; }
-      .ver:hover { color: var(--text); background: rgba(255,255,255,0.06); }
-      .ver::after { content: " ▾"; opacity: 0.7; }
-      body.collapsed .ver::after { content: " ▸"; }
+      /* version doubles as the collapse control — flush & invisible (like the
+         logo GM toggle), just a generous tap target within the header bar */
+      .ver { margin-left: auto; font-family: var(--mono); font-size: 9px; color: var(--muted); letter-spacing: 1px; cursor: pointer; padding: 9px 6px; margin: -9px -4px -9px 0; user-select: none; white-space: nowrap; -webkit-tap-highlight-color: transparent; }
+      .ver:hover { color: var(--text); }
       /* collapse the panel body to just header + tabs (mobile space-saver) */
       #player-main { transition: max-height 0.42s cubic-bezier(0.4, 0, 0.2, 1); }
       /* mobile / touch friendliness */
@@ -193,7 +193,7 @@
       .tech-grouplbl.core-lbl { border-left-color: #2faa5b; } /* CORE groups are green */
       /* the action-economy glyph sits once on the group header */
       .tech-grouplbl .acticon { width: 13px; height: 13px; color: var(--tech); flex: none; }
-      #grp-protocols .tech-grouplbl .acticon { color: #9fd2ff; }
+      #grp-protocols .tech-grouplbl .acticon, #grp-free .tech-grouplbl .acticon, #grp-react .tech-grouplbl .acticon { color: #9fd2ff; }
       /* CORE tab */
       .weapon.corew { border-left-color: #2faa5b; }
       .weapon.corew .acticon { color: #5ad17a; }
@@ -297,6 +297,8 @@
       .dice-col .die-btn svg { display: block; margin: 0 auto; width: 34px; height: 32px; }
       .dice-col .accbtn { border-color: #2d5fd0; color: #ffd76a; font-weight: 700; }
       .dice-col .disbtn { border-color: #5b21b6; color: #e6dcff; font-weight: 700; }
+      .dice-col .ocbtn { border-color: #ff5e14; }
+      .dice-col .ocbtn:hover { border-color: #ff8a3d; box-shadow: 0 0 8px rgba(255,94,20,0.55); }
       #traywrap { flex: 1; min-width: 0; }
       .scheme-sel { width: auto; max-width: 40%; font-size: 11px; padding: 4px 6px; margin-left: auto; }
       summary #advcount { float: right; font-weight: 400; font-size: 10px; font-family: var(--mono); opacity: 0.85; }
@@ -305,7 +307,16 @@
       #roll-context:empty { display: none; }
 
       #traywrap { position: relative; }
-      .dicetray { width: 100%; height: 348px; background: radial-gradient(ellipse at 50% 30%, #1b2230 0%, #0e1014 100%); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+      .dicetray { position: relative; width: 100%; height: 348px; background: radial-gradient(ellipse at 50% 30%, #1b2230 0%, #0e1014 100%); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+      /* OVERCHARGE: the tray's blue holo deck washes molten red while it rolls */
+      .dicetray.molten { border-color: #ff5e14; box-shadow: 0 0 26px rgba(255,90,10,0.4); transition: box-shadow 0.4s, border-color 0.4s; }
+      .dicetray.molten::after {
+        content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2; border-radius: 8px;
+        background: radial-gradient(ellipse at 50% 45%, rgba(255,110,20,0.16) 0%, rgba(150,20,0,0.42) 100%);
+        box-shadow: inset 0 0 70px rgba(255,70,0,0.55);
+        animation: moltenflux 0.85s ease-in-out infinite alternate;
+      }
+      @keyframes moltenflux { from { opacity: 0.7; } to { opacity: 1; } }
       /* HORUS cascade corruption while rolling — kept gentle (no strobing) */
       .dicetray.glitching canvas { animation: hglitch 0.6s ease-in-out infinite; }
       @keyframes hglitch {
@@ -401,6 +412,13 @@
       .bond-status.on { color: var(--good); }
       #vis-toggle { background: var(--panel-2); border: 1px solid var(--line); color: var(--gold); font-family: var(--mono); font-size: 11px; padding: 6px 10px; cursor: pointer; border-radius: 3px; }
       #vis-toggle.all { color: var(--good); }
+      /* paint palette */
+      .paint-row { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+      .paint-lbl { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 1px; flex: 0 0 auto; }
+      #paint-palette { display: flex; gap: 6px; flex: 1; }
+      .swatch { width: 26px; height: 26px; border-radius: 4px; border: 2px solid rgba(255,255,255,0.25); cursor: pointer; padding: 0; transition: transform 0.1s, border-color 0.1s, box-shadow 0.1s; }
+      .swatch:hover { transform: scale(1.1); }
+      .swatch.sel { border-color: #fff; box-shadow: 0 0 8px rgba(255,255,255,0.55); }
 
       /* ---------- MISSION//CONTROL (GM) ---------- */
       .gm-tabs { position: relative; display: flex; gap: 4px; align-items: stretch; margin-bottom: 10px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
@@ -465,7 +483,7 @@
       <header>
         <img id="hdr-icon" src="./icons/tool.svg" alt="mode" title="Toggle MISSION//CONTROL (GM view)" onerror="this.style.display='none'" />
         <h1 id="hdr-title">LANCER<span class="slash">//</span>UPLINK</h1>
-        <span class="ver" id="verbtn" title="Collapse / expand the panel">v2.8.8</span>
+        <span class="ver" id="verbtn" title="Collapse / expand the panel">v2.8.9</span>
         <span id="conn-dot" title="Owlbear link status"></span>
       </header>
       <nav class="tabs" id="tabnav">
@@ -541,6 +559,14 @@
                 <div class="tech-grouplbl">PROTOCOLS</div>
                 <div class="sys-wrap" id="protocols"></div>
               </div>
+              <div class="tech-group" id="grp-free">
+                <div class="tech-grouplbl">FREE ACTIONS</div>
+                <div class="sys-wrap" id="freeactions"></div>
+              </div>
+              <div class="tech-group" id="grp-react">
+                <div class="tech-grouplbl">REACTIONS</div>
+                <div class="sys-wrap" id="reactions"></div>
+              </div>
             </div>
           </details>
 
@@ -576,6 +602,7 @@
           <button class="die-btn" data-die="d20" title="Add a d20">d20</button>
           <button id="addadv" class="die-btn accbtn" title="Add an Accuracy d6 (blue/gold crystal)">ACC</button>
           <button id="adddis" class="die-btn disbtn" title="Add a Difficulty d6 (purple/white crystal)">DIF</button>
+          <button id="addovercharge" class="die-btn ocbtn" title="OVERCHARGE — roll the escalating heat cost. Right-click to reset.">OC</button>
         </div>
 
         <div id="traywrap">
@@ -662,6 +689,10 @@
             </div>
             <div class="row" style="margin-top:6px">
               <button id="clearranges" class="btn ghost small">CLEAR MY RANGE FIELDS</button>
+            </div>
+            <div class="paint-row">
+              <span class="paint-lbl">🖌 PAINT</span>
+              <div id="paint-palette"></div>
             </div>
           </div>
         </details>

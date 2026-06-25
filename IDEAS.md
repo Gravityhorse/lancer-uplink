@@ -65,6 +65,35 @@ version in descending order (newest first).
 
 ---
 
+## Shipped in 2.8.9 ✓
+
+- ✓ **Eraser restored.** A `createAction` call for the paint swatches was throwing
+  and aborting tool registration before the Eraser registered — removed it
+- ✓ **Paint reworked**: colour is chosen from a 6-swatch palette in the MAP tab
+  (which arms the brush); tiles honour the ALL/ME visibility, and are removed by
+  the Eraser, UNDO LAST and CLEAR MY TEMPLATES. New brush icon
+- ✓ **Collapse fixed**: the version is now a flush, invisible tap target (like the
+  logo) and actually shrinks the Owlbear popover (via `OBR.action.setHeight`) down
+  to just the header + tabs, not just the inner content
+- ✓ **Tooltip autoscroll actually works now** — it was stalling because
+  `scrollTop += 0.22` floors back to the same integer every frame; switched to a
+  float accumulator (hover + pinned, with manual-scroll override)
+- ✓ **Token bars on multiplayer**: add-then-delete kills the flicker, a status
+  poll keeps teammate data fresh, and a transient "token not found" no longer
+  blanks the bars
+- ✓ **FREE ACTIONS + REACTIONS** groups under Protocols (empty-hex glyph): Free →
+  Free Actions, Reaction → Reactions, with base Brace/Overwatch. Free/reaction
+  WEAPONS (Autogun → Free, Autopod → Reaction) get a plaque while staying in
+  WEAPONS
+- ✓ **Pilot-scale sheet**: the pilot, on foot, is now the last entry in the Active
+  Mech list — HP/armour/evasion, pilot weapons, gear-as-systems, same talents,
+  straight from the embedded loadout
+- ✓ **OVERCHARGE button** (molten orange hex under DIF): rolls the escalating
+  1 / 1d3 / 1d6 / 1d6+4 cost by use-count, washes the tray molten red, pours the
+  heat in (cascading through Stress). Respects Heatfall Coolant System's 1d6 cap.
+  Right-click resets the counter
+- ✓ Weapon-mod added range/threat now merges into the placed template's size
+
 ## Shipped in 2.8.8 ✓
 
 - ✓ **Token bars reworked to rhombus cells** matching the pilot HP/Heat UI — a

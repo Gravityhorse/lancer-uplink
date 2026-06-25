@@ -1,4 +1,4 @@
-# LANCER // UPLINK — v2.8.8
+# LANCER // UPLINK — v2.8.9
 
 A utility extension for [Owlbear Rodeo](https://www.owlbear.rodeo/) that brings
 [LANCER](https://massifpress.com/lancer) tooling to the virtual tabletop. Import

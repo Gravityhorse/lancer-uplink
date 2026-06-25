@@ -25,7 +25,7 @@ import {
   clearBoostField,
 } from "./overlay.js";
 import {
-  loadCompendium, listPilots, parsePilot, resolveMech,
+  loadCompendium, listPilots, parsePilot, resolveMech, resolvePilotScale,
   resolveTalents, coreInfo,
 } from "./compcon.js";
 // dice3d.js (three + cannon-es from CDN) loads lazily the first time the DICE
@@ -110,22 +110,37 @@ const diceTabActive = () =>
   const ver = $("verbtn");
   if (!main || !ver) return;
   let animating = false;
+  let fullHeight = 600; // popover height to restore on expand
+  const setPopover = (h) => { try { OBR.action.setHeight(Math.ceil(h)); } catch (_) {} };
   ver.addEventListener("click", () => {
     if (animating) return;
     animating = true;
     const collapsing = !document.body.classList.contains("collapsed");
     main.style.overflow = "hidden";
     main.style.maxHeight = main.scrollHeight + "px";
-    const onEnd = () => {
-      main.removeEventListener("transitionend", onEnd);
-      animating = false;
-      if (!collapsing) { main.style.maxHeight = ""; main.style.overflow = ""; } // restore sticky
-    };
-    main.addEventListener("transitionend", onEnd);
-    requestAnimationFrame(() => {
-      document.body.classList.toggle("collapsed", collapsing);
-      main.style.maxHeight = collapsing ? "0px" : main.scrollHeight + "px";
-    });
+    if (collapsing) {
+      // slide the body up, THEN shrink the actual Owlbear popover to the header
+      fullHeight = window.innerHeight || fullHeight;
+      requestAnimationFrame(() => { main.style.maxHeight = "0px"; });
+      const onEnd = () => {
+        main.removeEventListener("transitionend", onEnd);
+        document.body.classList.add("collapsed");
+        setPopover(($("topbar")?.offsetHeight || 80) + 2); // window = just header + tabs
+        animating = false;
+      };
+      main.addEventListener("transitionend", onEnd);
+    } else {
+      // grow the popover back first, then slide the body open
+      setPopover(fullHeight);
+      document.body.classList.remove("collapsed");
+      requestAnimationFrame(() => { main.style.maxHeight = main.scrollHeight + "px"; });
+      const onEnd = () => {
+        main.removeEventListener("transitionend", onEnd);
+        main.style.maxHeight = ""; main.style.overflow = ""; // restore sticky
+        animating = false;
+      };
+      main.addEventListener("transitionend", onEnd);
+    }
   });
 })();
 
@@ -353,11 +368,12 @@ async function renderTokenBars() {
   if (tokenBarsBusy) { tokenBarsPending = true; return; } // serialize rebuilds
   tokenBarsBusy = true;
   try {
-    const old = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === TBAR);
-    if (old.length) await OBR.scene.local.deleteItems(old.map((i) => i.id));
-    if (!tokenBarsOn) return;
+    if (!tokenBarsOn) {
+      const old = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === TBAR);
+      if (old.length) await OBR.scene.local.deleteItems(old.map((i) => i.id));
+      return;
+    }
     const targets = tokenBarTargets();
-    if (!targets.length) return;
     let tokens = [];
     try { tokens = await OBR.scene.items.getItems(targets.map((t) => t.id)); } catch (_) {}
     const byId = new Map(tokens.map((t) => [t.id, t]));
@@ -416,7 +432,16 @@ async function renderTokenBars() {
         num(heatY, `${t.heat}/${t.heatMax}`);
       }
     }
-    if (items.length) await OBR.scene.local.addItems(items);
+    // Add the NEW bars first, THEN remove the previous batch — no empty gap, no
+    // flicker. If we have targets but found none of their tokens this pass (a
+    // transient), keep the last good bars instead of blanking them.
+    const prev = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === TBAR);
+    if (items.length) {
+      await OBR.scene.local.addItems(items);
+      if (prev.length) await OBR.scene.local.deleteItems(prev.map((i) => i.id));
+    } else if (!targets.length && prev.length) {
+      await OBR.scene.local.deleteItems(prev.map((i) => i.id)); // genuinely nothing bonded
+    }
   } catch (e) {
     console.warn("[LANCER//UPLINK] token bars failed", e);
   } finally {
@@ -425,12 +450,17 @@ async function renderTokenBars() {
   }
 }
 
+let tokenBarPoll = 0;
 function setTokenBars(on) {
   tokenBarsOn = !!on;
   const cb = $("tokenbars-toggle");
   if (cb) cb.checked = tokenBarsOn;
-  // ask every other client to report in so their bonded tokens get bars too
-  if (tokenBarsOn) requestSquadStatus();
+  clearInterval(tokenBarPoll);
+  if (tokenBarsOn) {
+    // ask everyone to report in now, and keep teammate data fresh on a poll
+    requestSquadStatus();
+    tokenBarPoll = setInterval(() => { requestSquadStatus(); renderTokenBars(); }, 6000);
+  }
   renderTokenBars();
   saveState();
 }
@@ -764,7 +794,15 @@ function selectPilot(idx) {
       o.textContent = m.name || `Mech ${i + 1}`;
       sel.appendChild(o);
     });
-    $("mechpicker").classList.toggle("hidden", mechs.length < 2);
+    // the pilot themselves, on foot, at the bottom of the list
+    if (pilot.loadout) {
+      const po = document.createElement("option");
+      po.value = "pilot";
+      po.textContent = `○ ${pilot.callsign || pilot.name} — ON FOOT`;
+      sel.appendChild(po);
+    }
+    // show the picker whenever there's more than one option (mech + pilot counts)
+    $("mechpicker").classList.toggle("hidden", sel.options.length < 2);
 
     if (!mechs.length) {
       $("sheet").classList.add("hidden");
@@ -787,7 +825,7 @@ function selectPilot(idx) {
   }
 }
 
-$("mechselect").addEventListener("change", (e) => renderMech(Number(e.target.value)));
+$("mechselect").addEventListener("change", (e) => renderMech(e.target.value === "pilot" ? "pilot" : Number(e.target.value)));
 
 $("forgetpilot")?.addEventListener("click", () => {
   forgetState();
@@ -824,6 +862,7 @@ function initLive(m) {
     repairs: pick(cur.repairs, s.repMax),
     core: pick(cur.core, s.coreMax),
     overshield: pick(cur.overshield, 0) || 0,
+    overcharge: 0, // how many times overcharged this scene (escalating cost)
   };
   if (restoreLive) {
     live = { ...live, ...restoreLive };
@@ -841,11 +880,18 @@ function onLiveChanged() {
 }
 
 function renderMech(idx) {
-  const raw = currentMechs[idx];
-  if (!raw || !currentPilot) return;
-  const m = resolveMech(raw, currentPilot);
+  if (!currentPilot) return;
+  let m;
+  if (idx === "pilot") {
+    m = resolvePilotScale(currentPilot);
+    curMechIdx = "pilot";
+  } else {
+    const raw = currentMechs[Number(idx)];
+    if (!raw) return;
+    m = resolveMech(raw, currentPilot);
+    curMechIdx = Number(idx);
+  }
   currentMech = m;
-  curMechIdx = idx;
   const s = m.stats;
   initLive(m);
 
@@ -865,6 +911,7 @@ function renderMech(idx) {
   renderSystems(m);
   renderTalentChips();
   renderCore(m);
+  refreshOverchargeBtn();
 
   $("sheet").classList.remove("hidden");
   saveState();
@@ -1413,16 +1460,21 @@ const TECH_BASE = {
   full: [
     { name: "Stabilize", activation: "Full Tech", detail: "Choose one — COOL: clear all Heat and end Burning, then either clear one of Impaired/Exposed or spend a Repair to restore HP to full. PATCH: reload all LOADING weapons, OR clear a condition from an adjacent ally, OR give an adjacent ally the benefits of cooling." },
   ],
+  react: [
+    { name: "Brace", activation: "Reaction", detail: "1/round, when you are hit by an attack: until the end of your next turn you take only half damage from all attacks, gain RESISTANCE to all damage, can't take reactions, and become Stunned at the end of your next turn." },
+    { name: "Overwatch", activation: "Reaction", detail: "When a hostile character starts any movement while within Threat of one of your readied weapons, you may make an attack with that weapon against them as a reaction." },
+  ],
+  free: [],
 };
 
-// Bucket a tech action by activation. Invade → INVADE; "full" → FULL TECH;
-// Protocol / Free → PROTOCOLS; everything else (Quick Tech, Quick, Reaction…)
-// → QUICK TECH. Each chip still shows its TRUE activation in its header.
+// Bucket a tech action by activation. Each chip still shows its TRUE activation.
 function techBucket(activation) {
   const a = (activation || "").toLowerCase();
   if (a.includes("invade")) return "invade";
   if (a.includes("full")) return "full";
-  if (a.includes("protocol") || a.includes("free")) return "protocols";
+  if (a.includes("protocol")) return "protocols";
+  if (a.includes("reaction")) return "react";
+  if (a.includes("free")) return "free";
   return "quick";
 }
 
@@ -1432,6 +1484,8 @@ function gatherTechActions(m) {
     quick: TECH_BASE.quick.map((x) => ({ ...x })),
     full: TECH_BASE.full.map((x) => ({ ...x })),
     protocols: [],
+    free: TECH_BASE.free.map((x) => ({ ...x })),
+    react: TECH_BASE.react.map((x) => ({ ...x })),
   };
   const add = (name, activation, detail, src) => {
     if (!name) return;
@@ -1443,6 +1497,11 @@ function gatherTechActions(m) {
   }
   for (const t of resolveTalents(currentPilot?.talents || [])) {
     for (const a of t.actions || []) add(a.name, a.activation, a.detail, t.name);
+  }
+  // Free/reactionary WEAPONS get a reference plaque here too (they stay in WEAPONS).
+  for (const mt of m.mounts || []) for (const wp of mt.weapons || []) {
+    if (wp.freeKind === "free") add(wp.name, "Free Action — weapon", wp.effect, mt.label);
+    else if (wp.freeKind === "reaction") add(wp.name, "Reaction — weapon", wp.effect, mt.label);
   }
   return groups;
 }
@@ -1459,6 +1518,8 @@ function renderTechs(m) {
   setLabel("grp-quick", ICON_QUICK, "QUICK TECH");
   setLabel("grp-full", ICON_FULL, "FULL TECH");
   setLabel("grp-protocols", ICON_FREE, "PROTOCOLS");
+  setLabel("grp-free", ICON_FREE, "FREE ACTIONS");
+  setLabel("grp-react", ICON_FREE, "REACTIONS");
   const fill = (wrapId, list) => {
     const wrap = $(wrapId);
     if (!wrap) return;
@@ -1483,6 +1544,8 @@ function renderTechs(m) {
   fill("quicktech", groups.quick);
   fill("fulltech", groups.full);
   fill("protocols", groups.protocols);
+  fill("freeactions", groups.free);
+  fill("reactions", groups.react);
 }
 
 // ---- CORE tab: core system + core bonuses + frame chassis traits ----------------
@@ -1646,38 +1709,44 @@ function renderTalentChips() {
 const tipEl = $("tooltip");
 let tipScrollRaf = 0;
 let tipScrollTimer = 0;
+let tipScrollPos = 0; // FLOAT accumulator — integer scrollTop would stall the scroll
 
 function stopTipScroll() {
   cancelAnimationFrame(tipScrollRaf);
   clearTimeout(tipScrollTimer);
+  tipScrollPos = 0;
   const b = $("tt-body");
   if (b) { b.scrollTop = 0; b.style.opacity = "1"; }
 }
 
-// If the text outgrows the (already enlarged) box, wait a beat, scroll through
-// leisurely, pause at the end, fade out, and loop back to the top.
+// If the text outgrows the box, wait a beat, scroll through leisurely, pause at
+// the end, fade, and loop. Uses a float position because `scrollTop += 0.22`
+// gets floored back to the same integer every frame and never moves.
 function startTipScroll() {
   const b = $("tt-body");
   if (!b || b.scrollHeight <= b.clientHeight + 4) return;
+  tipScrollPos = 0;
   const cycle = () => {
     tipScrollTimer = setTimeout(() => {
       const step = () => {
-        b.scrollTop += 0.22; // truly leisurely
-        if (b.scrollTop + b.clientHeight < b.scrollHeight - 1) {
+        tipScrollPos += 0.45;
+        b.scrollTop = tipScrollPos;
+        if (tipScrollPos + b.clientHeight < b.scrollHeight - 1) {
           tipScrollRaf = requestAnimationFrame(step);
         } else {
           tipScrollTimer = setTimeout(() => {
             b.style.opacity = "0";
             tipScrollTimer = setTimeout(() => {
+              tipScrollPos = 0;
               b.scrollTop = 0;
               b.style.opacity = "1";
               cycle();
-            }, 900);
-          }, 1900);
+            }, 800);
+          }, 1700);
         }
       };
       tipScrollRaf = requestAnimationFrame(step);
-    }, 1500);
+    }, 1200);
   };
   cycle();
 }
@@ -1861,6 +1930,12 @@ function recolorDicePicker() {
   const acc = $("addadv"), dis = $("adddis");
   if (acc) acc.innerHTML = hexIcon("#2f7d49", "+");
   if (dis) dis.innerHTML = hexIcon("#a32630", "−");
+  // OVERCHARGE — molten orange hex with a flame
+  const oc = $("addovercharge");
+  if (oc) oc.innerHTML = `<svg viewBox="0 0 40 40" aria-label="Overcharge">
+    <polygon points="20,2 35,11 35,29 20,38 5,29 5,11" fill="#ff5e14" stroke="rgba(255,255,255,0.6)" stroke-width="1.5" stroke-linejoin="round"/>
+    <path d="M20 9 C22 14 26 15 24 21 C23 24 25 25 25 27 C25 30 22.5 31.5 20 31.5 C17.5 31.5 15 30 15 27 C15 23 19 22 18 16 C18.8 17 19.5 18 20 19 C20.6 16 19.8 12 20 9 Z" fill="#ffe08a"/>
+  </svg>`;
 }
 recolorDicePicker(); // initial paint with the default scheme colour
 
@@ -2103,6 +2178,74 @@ async function prepareTechAttack(label = "TECH ATTACK") {
   if (techAcc) accNote = `  · +${techAcc} ACC (frame)`;
   setContext(`${label} · d20 ${t >= 0 ? "+" : ""}${t} vs E-DEF${accNote}`, "tech", null);
 }
+
+// ---- OVERCHARGE -----------------------------------------------------------------
+// The escalating heat cost: 1 / 1d3 / 1d6 / 1d6+4 (then stays). Heatfall Coolant
+// System (core bonus) caps it at 1d6 with no +4. Rolls a molten die, flips the
+// tray blue→red, and pours the heat in (cascading through Stress).
+function overchargeTrack() {
+  const cap = (currentMech?.coreBonuses || []).some(
+    (c) => c.id === "cb_heatfall_coolant_system" || /heatfall/i.test(c.name || "")
+  );
+  return cap ? ["1", "1d3", "1d6", "1d6"] : ["1", "1d3", "1d6", "1d6+4"];
+}
+function refreshOverchargeBtn() {
+  const b = $("addovercharge");
+  if (!b) return;
+  const t = overchargeTrack();
+  const n = Math.min(live?.overcharge ?? 0, t.length - 1);
+  b.title = `OVERCHARGE — next cost ${t[n]} Heat (overcharged ${live?.overcharge ?? 0}× this scene). Right-click to reset.`;
+}
+async function doOvercharge() {
+  if (!currentMech || !live) return setStatus("Load a pilot first.", "status-err");
+  switchToDiceTab();
+  if (!(await ensureDiceTray()) || diceBusy) return;
+  diceBusy = true;
+  updateAdvCount();
+  const tray = $("dicetray");
+  try {
+    const track = overchargeTrack();
+    if (live.overcharge == null) live.overcharge = 0;
+    const n = Math.min(live.overcharge, track.length - 1);
+    const cost = track[n];
+    const asD3 = cost === "1d3";
+    const flat = cost === "1d6+4" ? 4 : cost === "1" ? 1 : 0;
+    const rollsDie = cost !== "1";
+    clearTrayAll(); hideResult();
+    setContext(`OVERCHARGE #${live.overcharge + 1} · ${cost} HEAT`, "dmg", null);
+    tray?.classList.add("molten"); // map aesthetic flips blue → molten red
+    let val = 0;
+    if (rollsDie) {
+      diceTray.addDie("d6", "oc");
+      const raw = await diceTray.roll(1);
+      diceTray.zoomToDice();
+      const d = raw && raw[0] ? raw[0].value : 1;
+      val = asD3 ? Math.ceil(d / 2) : d;
+    } else {
+      await new Promise((r) => setTimeout(r, 350));
+    }
+    const total = val + flat;
+    showResult({ total, sub: "OVERCHARGE", kind: "dmg", crit: "🔥 HEAT" });
+    live.overcharge++;
+    applyHeat(total); // cascades into Stress if it tips over capacity
+    onLiveChanged();
+    const next = overchargeTrack()[Math.min(live.overcharge, track.length - 1)];
+    logRoll({ kind: "sys", title: `OVERCHARGE → +${total} HEAT`, detail: `Cost ${cost}${rollsDie ? ` (rolled ${val})` : ""}. Next overcharge costs ${next}.` });
+    setStatus(`Overcharged: +${total} Heat (now ${live.heat}/${currentMech.stats.heatMax}).`, "status-ok");
+    refreshOverchargeBtn();
+  } catch (e) {
+    console.warn("[LANCER//UPLINK] overcharge failed", e);
+  } finally {
+    diceBusy = false;
+    updateAdvCount();
+    setTimeout(() => tray?.classList.remove("molten"), 1400);
+  }
+}
+$("addovercharge")?.addEventListener("click", doOvercharge);
+$("addovercharge")?.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  if (live) { live.overcharge = 0; onLiveChanged(); refreshOverchargeBtn(); setStatus("Overcharge counter reset.", "status-ok"); }
+});
 
 // FIRE: chains the locked weapon's damage right after its accuracy roll.
 // Respects the CRIT and OVERKILL toggles, so a crit confirmed by other means
@@ -2437,9 +2580,30 @@ $("btn-undo-tmpl")?.addEventListener("click", async () => {
   setStatus(ok ? "Last template removed." : "Nothing left to undo.", ok ? "status-ok" : "status-err");
 });
 $("clearmine")?.addEventListener("click", async () => {
-  try { await clearMyTemplates(); await clearLocalTemplates(); }
+  try { await clearMyTemplates(); await clearLocalTemplates(); await tool.clearMyPaint(); }
   catch (e) { console.warn("[LANCER//UPLINK] clear templates failed", e); }
 });
+
+// ---- paint palette: six swatches; click sets the colour and arms the Paint tool
+(function setupPaintPalette() {
+  const wrap = $("paint-palette");
+  if (!wrap || !tool.PAINT_COLORS) return;
+  wrap.innerHTML = "";
+  tool.PAINT_COLORS.forEach((c, i) => {
+    const b = document.createElement("button");
+    b.className = "swatch" + (i === 0 ? " sel" : "");
+    b.style.background = c.color;
+    b.title = `Paint ${c.key}`;
+    b.addEventListener("click", () => {
+      tool.setPaintColor(c.color);
+      wrap.querySelectorAll(".swatch").forEach((s) => s.classList.remove("sel"));
+      b.classList.add("sel");
+      tool.armPaint();
+      setStatus(`Paint armed (${c.key}). Click/drag the map to highlight tiles.`, "status-ok");
+    });
+    wrap.appendChild(b);
+  });
+})();
 $("clearranges")?.addEventListener("click", async () => {
   try { await clearAllLocalOverlays(); } catch (_) {}
   activeFields = {};
