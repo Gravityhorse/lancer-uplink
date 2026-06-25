@@ -60,14 +60,17 @@ version in descending order (newest first).
 
 ## Shipped in 2.8.9 ✓
 
-- ✓ **Root-cause render fix (invisible Pen / Paint / token bars)**: Owlbear keeps
-  an item's cached path mesh when you `updateItems` it — only its *position*
-  re-renders, not its `.commands` geometry — so anything that grew/changed a path
-  via update went invisible-but-present (you could still erase it). Everything now
-  follows the Move/Sensors/Range pattern of `addItems` only. The **Pen** is built
-  from many short round-jointed segments; **token bars** rebuild a token's set
-  (delete + add) only when that token's data actually changes, gated by a
-  per-token signature (no flicker, no brightness stacking, no vanish)
+- ✓ **Token bars render fix**: Owlbear keeps an item's cached path mesh on
+  `updateItems` (only its *position* re-renders, not `.commands` geometry), so the
+  diffed bars showed a stale/empty fill. They now rebuild a token's set (delete +
+  add) only when that token's data actually changes, gated by a per-token
+  signature — no flicker, no brightness stacking, no vanish
+- ✓ **Paint / Pen invisibility fixed — it was the layer.** They were drawing
+  SHARED items onto the GM-owned `DRAWING` layer, which a player can't write, so
+  the add rendered optimistically for ~1s then reverted on the next scene sync.
+  Moved both to `PROP` (where the blast/cone/line templates already live and
+  players CAN write). The Pen is also rebuilt from many short round-jointed
+  `addItems` segments rather than one growing path
 - ✓ **Remote rolls moved to a separate on-screen popover** (`roll-popup.html`):
   teammates' dice now replay in their own Owlbear popover anchored to the right of
   the *screen*, just left of the toolbar — never covering the panel. Fed over a

@@ -61,6 +61,9 @@ async function pump() {
     $("rp-total").textContent = String(d.total);
     $("rp-crit").textContent = d.crit || "";
     res.classList.add("revealed");
+    // the toast is shown HERE — only once the dice have settled — so it never
+    // spoils the number early (the panel no longer fires it on receipt)
+    try { OBR.notification.show(`${d.who || "Table"}: ${d.label} → ${d.total}`, "INFO"); } catch (_) {}
     await new Promise((r) => setTimeout(r, queue.length ? 2200 : 3200));
     if (!tray.isRolling()) { tray.clearTray(); tray.resetCamera(); }
   } catch (e) {

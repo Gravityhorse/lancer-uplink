@@ -429,7 +429,10 @@ async function paintTile(h) {
     if (cur) { try { await paintApi(cur.local).deleteItems([cur.id]); } catch (_) {} }
     const item = buildHexOverlay([h], {
       color: paintColor, fillOpacity: 0.3, strokeOpacity: 0.7, strokeWidth: 2,
-      name: "Paint", kind: local ? "paint-local" : "paint", layer: "DRAWING",
+      // PROP, not DRAWING: players can't write SHARED items to the GM-owned
+      // DRAWING layer (the add reverts on the next scene sync). PROP is the same
+      // layer the blast/cone/line templates use, which players CAN write.
+      name: "Paint", kind: local ? "paint-local" : "paint", layer: "PROP",
       extra: { group },
     });
     await paintApi(local).addItems([item]);
@@ -512,10 +515,15 @@ const penWidth = () => Math.max(3, (grid.dpi || 150) * 0.11);
 const penStep = () => (grid.dpi || 150) * 0.045; // min pointer travel between samples
 
 function penSegmentItem(a, b) {
+  // PROP layer (NOT DRAWING) — players can write shared items to PROP (where the
+  // templates live) but not to the GM-owned DRAWING layer, which silently
+  // reverts the add on the next scene sync. fillColor is set explicitly to match
+  // the proven template/overlay items.
   let p = buildPath().position({ x: 0, y: 0 })
     .commands([[Command.MOVE, a.x, a.y], [Command.LINE, b.x, b.y]])
-    .fillOpacity(0).strokeColor(paintColor).strokeOpacity(0.92).strokeWidth(penWidth())
-    .layer("DRAWING").name("Pen")
+    .fillColor(paintColor).fillOpacity(0)
+    .strokeColor(paintColor).strokeOpacity(0.95).strokeWidth(penWidth())
+    .layer("PROP").name("Pen")
     .metadata({ [META]: { kind: penLocal ? "pen-local" : "pen", group: penGroup } });
   // round caps/joins make consecutive segments read as one smooth stroke
   const opt = (fn, ...args) => { try { if (typeof p[fn] === "function") p = p[fn](...args); } catch (_) {} };

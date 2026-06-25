@@ -76,7 +76,7 @@ function saveState() {
         macro: $("macro-toggle")?.checked || false,
         tokenBars: tokenBarsOn,
         overcharge: $("overcharge-toggle")?.checked || false,
-        showRemoteRolls: $("remoteroll-toggle") ? $("remoteroll-toggle").checked : true,
+        hideRemoteRolls: $("remoteroll-toggle")?.checked || false,
         bond,
       }));
     } catch (_) { /* storage may be unavailable in some embeds */ }
@@ -815,17 +815,27 @@ function selectPilot(idx) {
 
     const sel = $("mechselect");
     sel.innerHTML = "";
+    // Pilot identity as the group header; each mech shows its frame (chassis) so
+    // you can tell the equipment apart at a glance.
+    const grp = document.createElement("optgroup");
+    grp.label = pilot.callsign && pilot.name && pilot.callsign !== pilot.name
+      ? `${pilot.callsign} — ${pilot.name}`
+      : (pilot.callsign || pilot.name || "PILOT");
     mechs.forEach((m, i) => {
       const o = document.createElement("option");
       o.value = String(i);
-      o.textContent = m.name || `Mech ${i + 1}`;
-      sel.appendChild(o);
+      const frameName = m.frameData?.name || "";
+      o.textContent = frameName && frameName.toLowerCase() !== (m.name || "").toLowerCase()
+        ? `${m.name || `Mech ${i + 1}`} · ${frameName}`
+        : (m.name || `Mech ${i + 1}`);
+      grp.appendChild(o);
     });
-    // the pilot themselves, on foot, at the bottom of the list
+    sel.appendChild(grp);
+    // the pilot themselves, on foot (with their pilot gear), at the bottom
     if (pilot.loadout) {
       const po = document.createElement("option");
       po.value = "pilot";
-      po.textContent = `○ ${pilot.callsign || pilot.name} — ON FOOT`;
+      po.textContent = `○ ${pilot.name || pilot.callsign}${pilot.callsign && pilot.name ? ` “${pilot.callsign}”` : ""} — ON FOOT`;
       sel.appendChild(po);
     }
     // show the picker whenever there's more than one option (mech + pilot counts)
@@ -1756,7 +1766,7 @@ function startTipScroll() {
   const cycle = () => {
     tipScrollTimer = setTimeout(() => {
       const step = () => {
-        tipScrollPos += 0.45;
+        tipScrollPos += 0.38;
         b.scrollTop = tipScrollPos;
         if (tipScrollPos + b.clientHeight < b.scrollHeight - 1) {
           tipScrollRaf = requestAnimationFrame(step);
@@ -2535,7 +2545,7 @@ $("rolldice")?.addEventListener("click", () => { if (overchargePrimed) resolveOv
 // the right of the SCREEN (just left of the toolbar) — never covering the panel.
 // The panel feeds rolls to that window over the same-client LOCAL broadcast; a
 // ready/closed handshake makes the open + delivery reliable across re-opens.
-const showRemoteRolls = () => ($("remoteroll-toggle") ? $("remoteroll-toggle").checked : true);
+const showRemoteRolls = () => !($("remoteroll-toggle")?.checked); // toggle = HIDE, default off → shown
 let rpUid = 0;
 let rpBuffer = [];      // recent public rolls (uid-tagged) for the popup to pull
 let rpOpen = false;     // is the popover believed to be open?
@@ -2582,7 +2592,8 @@ function onRemoteRoll(d) {
     detail: d.detail || "",
     critTxt: d.crit ? `<span class="crit"> ${d.crit}</span>` : "",
   });
-  try { OBR.notification.show(`${d.who}: ${d.label} → ${d.total}`, "INFO"); } catch (_) {}
+  // NB: no instant "Player → 10" toast here — it spoiled the number before the
+  // dice landed. The popover shows it AFTER the roll finalises (see roll-popup.js).
   if (!showRemoteRolls()) return; // the combat log still has it
 
   const entry = { ...d, uid: `${Date.now()}-${++rpUid}` };
@@ -3001,7 +3012,7 @@ async function start() {
   if ($("macro-toggle")) $("macro-toggle").checked = !!st.macro;
   if (st.tokenBars) { tokenBarsOn = true; if ($("tokenbars-toggle")) $("tokenbars-toggle").checked = true; }
   setOverchargeEnabled(!!st.overcharge); // off unless the player turned it on
-  if ($("remoteroll-toggle") && st.showRemoteRolls === false) $("remoteroll-toggle").checked = false;
+  if ($("remoteroll-toggle") && st.hideRemoteRolls) $("remoteroll-toggle").checked = true;
   if (st.bond && st.bond.id) bond = st.bond;
   updateBondUI();
   if (st.live) restoreLive = st.live;
