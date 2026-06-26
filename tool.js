@@ -107,12 +107,7 @@ export async function undoLastTemplate() {
   try {
     const api = entry.local ? OBR.scene.local : OBR.scene.items;
     const items = await api.getItems((i) => i.metadata?.[META]?.group === entry.group);
-    if (items.length) {
-      await api.deleteItems(items.map((i) => i.id));
-      // a paint stroke shares this group — forget those tiles so they repaint
-      const ids = new Set(items.map((i) => i.id));
-      for (const [k, v] of [...painted]) if (ids.has(v.id)) painted.delete(k);
-    }
+    if (items.length) await api.deleteItems(items.map((i) => i.id));
     return true;
   } catch (_) {
     return false;
@@ -217,48 +212,72 @@ const disarm = () => { armed = null; };
 
 // ---- live preview + cursor distance counter (SERIALIZED) ------------------------------
 let previewBusy = false;
-let previewNext = null; // { hexes, color, cursor: {pos, n} | null } | "clear"
+let previewNext = null;   // latest-wins preview job: {type:"hex"|"path"|"clear", ...}
+let commitQueue = [];     // FIFO real-item commits — NEVER coalesced/dropped
 
 function requestPreview(hexes, color, cursor) {
-  previewNext = { hexes, color, cursor: cursor || null };
+  previewNext = { type: "hex", hexes, color, cursor: cursor || null };
+  pumpPreview();
+}
+function requestPathPreview(item) {
+  previewNext = { type: "path", item };
   pumpPreview();
 }
 function requestPreviewClear() {
-  previewNext = "clear";
+  previewNext = { type: "clear" };
+  pumpPreview();
+}
+// Commit a real item the SAME way templates do — once, after the gesture ends.
+// (Adding shared items mid-drag gets reverted by Owlbear on the next sync.)
+function requestCommit(item, local, group) {
+  previewNext = null; // the gesture is over — drop any pending preview so none
+                      // re-appears on top of the committed item
+  commitQueue.push({ item, local, group });
   pumpPreview();
 }
 
 async function pumpPreview() {
-  if (previewBusy || previewNext == null) return;
+  if (previewBusy) return;
+  if (!commitQueue.length && previewNext == null) return;
   previewBusy = true;
-  const job = previewNext;
-  previewNext = null;
   try {
-    await deleteAllPreviews();
-    if (job !== "clear") {
-      const items = [];
-      if (job.hexes.length) {
-        items.push(buildHexOverlay(job.hexes, {
-          color: job.color,
-          fillOpacity: 0.18,
-          strokeOpacity: 0.6,
-          strokeWidth: 2,
-          name: "Template preview",
-          kind: "preview",
-          layer: "PROP",
-        }));
+    if (commitQueue.length) {
+      // commits take priority and run in order; clear previews then add the item
+      const job = commitQueue.shift();
+      await deleteAllPreviews();
+      try {
+        if (job.local) await OBR.scene.local.addItems([job.item]);
+        else await OBR.scene.items.addItems([job.item]);
+        undoStack.push({ local: job.local, group: job.group });
+        if (undoStack.length > 40) undoStack.shift();
+      } catch (_) {}
+    } else {
+      const job = previewNext;
+      previewNext = null;
+      await deleteAllPreviews();
+      if (job.type === "hex") {
+        const items = [];
+        if (job.hexes.length) {
+          items.push(buildHexOverlay(job.hexes, {
+            color: job.color, fillOpacity: 0.18, strokeOpacity: 0.6, strokeWidth: 2,
+            name: "Template preview", kind: "preview", layer: "PROP",
+          }));
+        }
+        if (job.cursor) {
+          items.push(distanceLabelItem(
+            { x: job.cursor.pos.x, y: job.cursor.pos.y - (grid.dpi || 150) * 0.55 },
+            job.cursor.n, null, "preview"
+          ));
+        }
+        if (items.length) await OBR.scene.local.addItems(items);
+      } else if (job.type === "path") {
+        if (job.item) await OBR.scene.local.addItems([job.item]);
       }
-      if (job.cursor) {
-        items.push(distanceLabelItem(
-          { x: job.cursor.pos.x, y: job.cursor.pos.y - (grid.dpi || 150) * 0.55 },
-          job.cursor.n, null, "preview"
-        ));
-      }
-      if (items.length) await OBR.scene.local.addItems(items);
+      // "clear" → nothing after deleteAllPreviews
     }
   } catch (_) { /* scene not ready — ignore */ }
   previewBusy = false;
-  if (previewNext != null) pumpPreview();
+  if (commitQueue.length || previewNext != null) pumpPreview();
 }
 
 async function deleteAllPreviews() {
@@ -413,68 +432,33 @@ function directionalMode(shape, icon, fn, snap) {
 // Painted tiles honour the templates ALL/ME visibility (shared items when ALL,
 // local when ME), carry their own kind so they never touch Move/Sensors/Range,
 // are erasable, undoable (per stroke) and clearable. Painted in the palette colour.
-const painted = new Map(); // hexKey -> { id, color, local }
-let paintStrokeGroup = null;
-let paintChain = Promise.resolve(); // serialise paints so a drag never races
-
-const paintApi = (local) => (local ? OBR.scene.local : OBR.scene.items);
-
-async function paintTile(h) {
-  const key = hexKey(h);
-  const cur = painted.get(key);
-  if (cur && cur.color === paintColor) return; // already this colour
+// PAINT — accumulate the hexes you sweep, preview them locally, and commit ONE
+// overlay on drag-END (the only thing that reliably persists). Honours ALL/ME
+// visibility, its own kind (never touches Move/Sensors/Range), erasable + undoable.
+let paintHexes = null; // Map hexKey -> hex
+function paintBegin(p) { paintHexes = new Map(); paintTouch(p); }
+function paintTouch(p) {
+  if (!paintHexes) return false;
+  const h = pixelToHex(p), k = hexKey(h);
+  if (paintHexes.has(k)) return false;
+  paintHexes.set(k, h);
+  return true;
+}
+function paintPreview() { if (paintHexes) requestPreview([...paintHexes.values()], paintColor, null); }
+function paintCommit() {
+  const hexes = paintHexes ? [...paintHexes.values()] : [];
+  paintHexes = null;
+  if (!hexes.length) { requestPreviewClear(); return; }
   const local = templateVisibility === "me";
-  const group = paintStrokeGroup || `paint-${Date.now()}-${++groupSeq}`;
-  try {
-    if (cur) { try { await paintApi(cur.local).deleteItems([cur.id]); } catch (_) {} }
-    const item = buildHexOverlay([h], {
-      color: paintColor, fillOpacity: 0.3, strokeOpacity: 0.7, strokeWidth: 2,
-      // PROP, not DRAWING: players can't write SHARED items to the GM-owned
-      // DRAWING layer (the add reverts on the next scene sync). PROP is the same
-      // layer the blast/cone/line templates use, which players CAN write.
-      name: "Paint", kind: local ? "paint-local" : "paint", layer: "PROP",
-      extra: { group },
-    });
-    await paintApi(local).addItems([item]);
-    painted.set(key, { id: item.id, color: paintColor, local });
-  } catch (_) {}
-}
-const paintAt = (p) => { paintChain = paintChain.then(() => paintTile(pixelToHex(p))).catch(() => {}); return paintChain; };
-
-function startPaintStroke() { paintStrokeGroup = `paint-${Date.now()}-${++groupSeq}`; }
-function finishPaintStroke() {
-  if (paintStrokeGroup) {
-    undoStack.push({ local: templateVisibility === "me", group: paintStrokeGroup });
-    if (undoStack.length > 40) undoStack.shift();
-    paintStrokeGroup = null;
-  }
-}
-
-const cleanPainted = (hit) => {
-  const ids = new Set(hit.map((i) => i.id));
-  for (const [k, v] of [...painted]) if (ids.has(v.id)) painted.delete(k);
-};
-
-async function erasePaintAt(p) {
-  const radius = Math.max(60, (grid.square ? grid.S : grid.R * 1.9) * 1.2);
-  const near = (i) => (i.commands || []).some((c) => c[0] === 0 && Math.hypot(c[1] - p.x, c[2] - p.y) < radius);
-  let did = false;
-  try {
-    const loc = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === "paint-local");
-    const hit = loc.filter(near);
-    if (hit.length) { await OBR.scene.local.deleteItems(hit.map((i) => i.id)); cleanPainted(hit); did = true; }
-  } catch (_) {}
-  try {
-    const me = await OBR.player.getId();
-    const sh = await OBR.scene.items.getItems((i) => i.metadata?.[META]?.kind === "paint" && i.createdUserId === me);
-    const hit = sh.filter(near);
-    if (hit.length) { await OBR.scene.items.deleteItems(hit.map((i) => i.id)); cleanPainted(hit); did = true; }
-  } catch (_) {}
-  return did;
+  const group = `paint-${Date.now()}-${++groupSeq}`;
+  const item = buildHexOverlay(hexes, {
+    color: paintColor, fillOpacity: 0.3, strokeOpacity: 0.7, strokeWidth: 2,
+    name: "Paint", kind: local ? "paint-local" : "paint", layer: "PROP", extra: { group },
+  });
+  requestCommit(item, local, group);
 }
 
 export async function clearMyPaint() {
-  painted.clear();
   try {
     const loc = await OBR.scene.local.getItems((i) => ["paint-local", "pen-local"].includes(i.metadata?.[META]?.kind));
     if (loc.length) await OBR.scene.local.deleteItems(loc.map((i) => i.id));
@@ -491,81 +475,61 @@ function paintMode(icon) {
     id: MODES.paint,
     icons: [{ icon, label: "Paint", filter: { activeTools: [TOOL] } }],
     cursors: [{ cursor: "crosshair" }],
-    async onToolClick(_ctx, ev) { startPaintStroke(); await paintAt(ev.pointerPosition); finishPaintStroke(); },
-    async onToolDragStart(_ctx, ev) { startPaintStroke(); await paintAt(ev.pointerPosition); },
-    async onToolDragMove(_ctx, ev) { await paintAt(ev.pointerPosition); },
-    onToolDragEnd() { finishPaintStroke(); },
-    onToolDragCancel() { finishPaintStroke(); },
+    onToolClick(_ctx, ev) { paintBegin(ev.pointerPosition); paintCommit(); },
+    onToolDragStart(_ctx, ev) { paintBegin(ev.pointerPosition); paintPreview(); },
+    onToolDragMove(_ctx, ev) { if (paintTouch(ev.pointerPosition)) paintPreview(); },
+    onToolDragEnd() { paintCommit(); },
+    onToolDragCancel() { paintHexes = null; requestPreviewClear(); },
   };
 }
 
-// ---- pen (freehand drawing, NO grid snapping) ---------------------------------
-// A true freehand stroke that samples the raw pointer path (never snaps to
-// hexes). Built as MANY short 2-point segments added with addItems — exactly
-// the proven Move/Sensors/Range pattern. We deliberately NEVER updateItems()
-// the geometry: Owlbear re-renders an item's position on update but keeps the
-// cached path mesh, so a growing `.commands` array goes invisible. Each segment
-// is round-capped so they read as one continuous line. Moderate thickness
-// scaled to the tile size (~1/9 of a cell, one cell ≈ one token). Honours the
-// ALL/ME visibility, draws in the shared Template Color, erasable + undoable.
-let penLast = null, penLocal = false, penGroup = null;
-let penChain = Promise.resolve();
-const penApi = (local) => (local ? OBR.scene.local : OBR.scene.items);
+// PEN — freehand: accumulate the raw pointer path (NO hex snapping), preview a
+// path locally, commit ONE path on drag-END. Same commit-on-end lifecycle as the
+// templates, which is the only thing Owlbear reliably keeps.
+let penPts = null, penLocal = false, penGroup = null;
 const penWidth = () => Math.max(3, (grid.dpi || 150) * 0.11);
-const penStep = () => (grid.dpi || 150) * 0.045; // min pointer travel between samples
-
-function penSegmentItem(a, b) {
-  // PROP layer (NOT DRAWING) — players can write shared items to PROP (where the
-  // templates live) but not to the GM-owned DRAWING layer, which silently
-  // reverts the add on the next scene sync. fillColor is set explicitly to match
-  // the proven template/overlay items.
-  let p = buildPath().position({ x: 0, y: 0 })
-    .commands([[Command.MOVE, a.x, a.y], [Command.LINE, b.x, b.y]])
+const penStep = () => (grid.dpi || 150) * 0.04; // min pointer travel between samples
+const penPair = (pts) => (pts.length >= 2 ? pts : [pts[0], { x: pts[0].x + 0.8, y: pts[0].y + 0.8 }]);
+function penPathItem(points, preview, group, local) {
+  const cmds = [[Command.MOVE, points[0].x, points[0].y]];
+  for (let i = 1; i < points.length; i++) cmds.push([Command.LINE, points[i].x, points[i].y]);
+  let b = buildPath().position({ x: 0, y: 0 }).commands(cmds)
     .fillColor(paintColor).fillOpacity(0)
-    .strokeColor(paintColor).strokeOpacity(0.95).strokeWidth(penWidth())
+    .strokeColor(paintColor).strokeOpacity(preview ? 0.55 : 0.95).strokeWidth(penWidth())
     .layer("PROP").name("Pen")
-    .metadata({ [META]: { kind: penLocal ? "pen-local" : "pen", group: penGroup } });
-  // round caps/joins make consecutive segments read as one smooth stroke
-  const opt = (fn, ...args) => { try { if (typeof p[fn] === "function") p = p[fn](...args); } catch (_) {} };
+    .metadata({ [META]: { kind: preview ? "preview" : (local ? "pen-local" : "pen"), group } });
+  const opt = (fn, ...a) => { try { if (typeof b[fn] === "function") b = b[fn](...a); } catch (_) {} };
   opt("strokeCap", "round");
   opt("strokeJoin", "round");
-  return p.build();
+  return b.build();
 }
-async function penDab(a, b) {
-  try { await penApi(penLocal).addItems([penSegmentItem(a, b)]); } catch (_) {}
+function penBegin(p) { penLocal = templateVisibility === "me"; penGroup = `pen-${Date.now()}-${++groupSeq}`; penPts = [{ x: p.x, y: p.y }]; }
+function penTouch(p) {
+  if (!penPts) return false;
+  const last = penPts[penPts.length - 1];
+  if (Math.hypot(p.x - last.x, p.y - last.y) < penStep()) return false;
+  penPts.push({ x: p.x, y: p.y });
+  return true;
 }
-async function penStart(p) {
-  penLocal = templateVisibility === "me";
-  penGroup = `pen-${Date.now()}-${++groupSeq}`;
-  penLast = { x: p.x, y: p.y };
-  await penDab(penLast, { x: p.x + 0.6, y: p.y + 0.6 }); // a dot so a click leaves a mark
+function penPreview() { if (penPts) requestPathPreview(penPathItem(penPair(penPts), true, penGroup, penLocal)); }
+function penCommit() {
+  if (!penPts) { requestPreviewClear(); return; }
+  const item = penPathItem(penPair(penPts), false, penGroup, penLocal);
+  const grp = penGroup, loc = penLocal;
+  penPts = null; penGroup = null;
+  requestCommit(item, loc, grp);
 }
-async function penExtend(p) {
-  if (!penLast) return;
-  if (Math.hypot(p.x - penLast.x, p.y - penLast.y) < penStep()) return;
-  const a = penLast;
-  penLast = { x: p.x, y: p.y };
-  await penDab(a, penLast);
-}
-function penFinish() {
-  if (penGroup) {
-    undoStack.push({ local: penLocal, group: penGroup });
-    if (undoStack.length > 40) undoStack.shift();
-  }
-  penLast = null; penGroup = null;
-}
-const penDo = (fn) => { penChain = penChain.then(fn).catch(() => {}); return penChain; };
 
 function penMode(icon) {
   return {
     id: MODES.pen,
     icons: [{ icon, label: "Pen", filter: { activeTools: [TOOL] } }],
     cursors: [{ cursor: "crosshair" }],
-    async onToolDragStart(_ctx, ev) { const p = ev.pointerPosition; await penDo(() => penStart(p)); },
-    async onToolDragMove(_ctx, ev) { const p = ev.pointerPosition; await penDo(() => penExtend(p)); },
-    onToolDragEnd() { penDo(() => penFinish()); },
-    onToolDragCancel() { penDo(() => penFinish()); },
-    async onToolClick(_ctx, ev) { const p = ev.pointerPosition; await penDo(async () => { await penStart(p); penFinish(); }); },
+    onToolClick(_ctx, ev) { penBegin(ev.pointerPosition); penCommit(); },
+    onToolDragStart(_ctx, ev) { penBegin(ev.pointerPosition); penPreview(); },
+    onToolDragMove(_ctx, ev) { if (penTouch(ev.pointerPosition)) penPreview(); },
+    onToolDragEnd() { penCommit(); },
+    onToolDragCancel() { penPts = null; penGroup = null; requestPreviewClear(); },
   };
 }
 
@@ -600,8 +564,9 @@ async function eraseAt(p) {
 
   if (await wipeGroups(OBR.scene.local, "template-local")) return true;
   if (await wipeGroups(OBR.scene.local, "pen-local")) return true;
+  if (await wipeGroups(OBR.scene.local, "paint-local")) return true;
 
-  // shared templates + pen strokes: only my own
+  // shared templates / pen / paint: only my own
   const wipeSharedOwn = async (kind) => {
     try {
       const me = await OBR.player.getId();
@@ -618,9 +583,7 @@ async function eraseAt(p) {
   };
   if (await wipeSharedOwn("template")) return true;
   if (await wipeSharedOwn("pen")) return true;
-
-  // painted tiles (local) erase last
-  if (await erasePaintAt(p)) return true;
+  if (await wipeSharedOwn("paint")) return true;
   return false;
 }
 

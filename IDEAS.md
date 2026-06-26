@@ -58,6 +58,44 @@ version in descending order (newest first).
 
 ---
 
+## ⚠ Known bugs / watch-list
+
+- **Remote-roll popover positioning is unverified.** The separate on-screen roll
+  window (2.8.9) anchors ~86px from the right edge — a guess at the toolbar width.
+  May need nudging; the ready/closed handshake also wants a real two-client test.
+- **Eraser click-and-drag is imperfect.** Single-click erase is solid; the
+  hold-and-drag pass can miss fast sweeps. Needs tuning.
+- **Everything Owlbear/WebGL is untested by the author of these changes** — grid
+  auto-calibration, token bars, paint/pen, the overcharge deck recolor and the
+  popover all want an at-the-table pass.
+- **No multi-profile weapon support** — the first profile is always used.
+- **Token bars can't hover-reveal** — Owlbear exposes no item-hover event, so exact
+  values show on selection only.
+
+---
+
+## Shipped in 2.8.10 ✓
+
+- ✓ **Paint & Pen finally fixed — it was the lifecycle, not the layer.** They were
+  calling `addItems` on SHARED items *during* the tool drag (`onToolDragMove`), and
+  Owlbear reverts mid-interaction adds on the next sync (visible ~1s, then gone).
+  Rebuilt both to do exactly what the working templates do: show a LOCAL preview
+  while you drag, then commit ONE real item on drag-END (via a never-dropped commit
+  queue). Paint commits the swept hexes as one overlay; Pen commits the freehand
+  path. Erase/undo/clear updated to match
+- ✓ **Overcharge level meter**: four segmented cells next to CLEAR OC (same look as
+  the Heat bar) that fill orange 0→4 with each overcharge. Shows only when
+  Overcharge Dice is enabled
+- ✓ **Overcharge recolors the deck on the FIRST level too** — the instant +1 Heat
+  now flashes the reactor red like the rolled levels, instead of sitting on a calm
+  blue map
+- ✓ Toggle renamed **"Hide other players' dice rolls"** (off by default = shown);
+  **"Overcharge" → "Overcharge Dice"**; **"Active mech" → "Active Mech"** with the
+  pilot name as the dropdown group header and each mech's frame shown as its
+  equipment
+- ✓ The premature "Player → 10" toast is gone — the popover now fires it only after
+  the dice settle. Lavender tooltip autoscroll eased slightly
+
 ## Shipped in 2.8.9 ✓
 
 - ✓ **Token bars render fix**: Owlbear keeps an item's cached path mesh on

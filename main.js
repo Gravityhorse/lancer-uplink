@@ -2231,12 +2231,21 @@ function overchargeTrack() {
   );
   return cap ? ["1", "1d3", "1d6", "1d6"] : ["1", "1d3", "1d6", "1d6+4"];
 }
+function refreshOCMeter() {
+  const m = $("oc-meter");
+  if (!m) return;
+  const lvl = Math.max(0, Math.min(4, live?.overcharge ?? 0));
+  let segs = "";
+  for (let i = 0; i < 4; i++) segs += `<span class="seg ${i < lvl ? "on" : ""}" style="--segc:#ff7a1a"></span>`;
+  m.innerHTML = segs;
+}
 function refreshOverchargeBtn() {
   const b = $("addovercharge");
   if (!b) return;
   const t = overchargeTrack();
   const n = Math.min(live?.overcharge ?? 0, t.length - 1);
   b.title = `OVERCHARGE — next cost ${t[n]} Heat (overcharged ${live?.overcharge ?? 0}× this scene). Right-click to reset.`;
+  refreshOCMeter();
 }
 // OVERCHARGE, ported to the Overkill heat flow. The FIRST overcharge (flat 1
 // Heat) needs no die — clicking the hex shows a clean "1" with a "+1 HEAT"
@@ -2256,7 +2265,9 @@ async function primeOvercharge() {
   const flat = cost === "1d6+4" ? 4 : cost === "1" ? 1 : 0;
   if (cost === "1") {            // first overcharge — no roll, just the +1 Heat
     clearTrayAll(); hideResult();
+    diceTray.setOvercharge?.(true);   // flash the reactor red even with no die
     finishOvercharge(flat, cost, null);
+    setTimeout(() => diceTray.setOvercharge?.(false), 1600);
     return;
   }
   clearTrayAll(); hideResult();
@@ -2315,11 +2326,13 @@ $("clear-oc")?.addEventListener("click", resetOvercharge);
 // House-rule gate: the OC hex + CLEAR OC button only exist when enabled. Hidden
 // by default; the dice column reflows to fit (no empty slot left behind).
 function setOverchargeEnabled(on) {
-  const oc = $("addovercharge"), clr = $("clear-oc");
+  const oc = $("addovercharge"), clr = $("clear-oc"), meter = $("oc-meter");
   if (oc) oc.style.display = on ? "" : "none";
   if (clr) clr.style.display = on ? "" : "none";
+  if (meter) meter.style.display = on ? "" : "none";
   const cb = $("overcharge-toggle");
   if (cb) cb.checked = !!on;
+  if (on) refreshOCMeter();
   if (!on && overchargePrimed) { overchargePrimed = null; diceTray?.setOvercharge?.(false); }
 }
 setOverchargeEnabled(false); // default OFF until the player opts in

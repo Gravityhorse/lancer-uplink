@@ -360,6 +360,8 @@
       /* CLEAR OC — resets the Overcharge track after a full rest (standard grey) */
       .occlr { background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); border-radius: 3px; font-family: var(--mono); font-size: 9px; letter-spacing: 0.5px; padding: 4px 8px; cursor: pointer; line-height: 1; white-space: nowrap; }
       .occlr:hover { border-color: var(--crimson); color: var(--text); }
+      /* Overcharge level meter — same segmented look as the Heat bar, 4 cells */
+      .ocmeter { flex: 0 0 auto; width: 46px; height: 14px; padding: 0; }
 
       #rolllog { max-height: 200px; overflow-y: auto; }
       .roll { background: var(--panel-2); border: 1px solid var(--line); border-left: 3px solid var(--crimson); border-radius: 3px; padding: 6px 8px; margin-bottom: 6px; font-size: 12px; }
@@ -453,7 +455,7 @@
       <header>
         <img id="hdr-icon" src="./icons/tool.svg" alt="mode" title="Toggle MISSION//CONTROL (GM view)" onerror="this.style.display='none'" />
         <h1 id="hdr-title">LANCER<span class="slash">//</span>UPLINK</h1>
-        <span class="ver" id="verbtn" title="Collapse / expand the panel">v2.8.9</span>
+        <span class="ver" id="verbtn" title="Collapse / expand the panel">v2.8.10</span>
         <span id="conn-dot" title="Owlbear link status"></span>
       </header>
       <nav class="tabs" id="tabnav">
@@ -610,6 +612,7 @@
           <label class="chk" title="Keep only the highest normal die"><input id="keephigh" type="checkbox" /> KEEP HIGH</label>
           <label class="chk" title="Roll stays on your screen only"><input id="hideroll" type="checkbox" /> HIDDEN</label>
           <button id="clear-oc" class="occlr" title="Reset the Overcharge counter to base (after a full rest)">CLEAR OC</button>
+          <span id="oc-meter" class="segbar ocmeter" title="Overcharge level (0–4)"></span>
           <button id="snd-toggle" class="sndbtn" title="Dice sounds on/off">🔊</button>
           <select id="scheme" class="scheme-sel" title="Dice faction"></select>
         </div>
