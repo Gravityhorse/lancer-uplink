@@ -40,39 +40,110 @@ version in descending order (newest first).
   soft/hard cover.
 - **Difficult-terrain-aware movement** — green field costs 2 per marked hex.
 
+### Right-click "Lancer Uplink" suite (started 2.8.11)
+The embedded context menu shipped with Move / Boost / Sensors / Weapons. Next:
+- **"More" mini-compendium** — under the four core buttons, a *More* drawer that
+  re-renders the pilot's Weapons / Techs / Systems / Talents / Core as the same
+  lavender-tooltip plaques the panel uses. *Build note:* the embed is a separate
+  iframe, so it can't call the panel's DOM renderers directly. Two ways to do it:
+  (a) the panel serialises each group's rendered HTML + tooltip text and pushes it
+  over `CH_CM_DATA`, and the embed re-wires its own hover handlers; or (b) factor
+  the chip/tooltip renderer into a shared module both contexts import. (b) is
+  cleaner long-term.
+- **"Move Here" on a green tile** — right-click an empty hex inside the Move/Boost
+  field to get a *Move Here* action that animates the token to it. *Feasibility
+  note:* Owlbear context menus only fire on selected ITEMS, not empty tiles, so
+  this can't be a context-menu item. Options to explore: a dedicated "Move" tool
+  mode where a left-click inside the active field moves the token
+  (`OBR.scene.items.updateItems` on the token position — position updates DO
+  re-render), or a transient clickable label item placed at the hovered hex. Wants
+  a spike before committing.
+- **Weapon attack/damage from the right-click** — wire the embed's weapon entries
+  to the ATK / DMG flows, not just range, so the whole loop lives in the menu.
+
 ### Sync / multiplayer
 - **Roll-history sync** for late joiners (store the last N rolls in scene
   metadata, not just live broadcasts).
 - **Write HP/Heat to token metadata** so other health-bar extensions can read it.
 - **Broadcast per-player dice schemes** so HORUS glitch shows on everyone's tray.
 
+### Player usability / ease of access (new focus)
+- **Keyboard shortcuts** — R to roll, C to clear, 1–6 to queue dice, M/B/S for
+  Move/Boost/Sensors on the bonded token.
+- **"My turn" quick-bar** — a single collapsible strip (or the right-click menu)
+  with the four most-used actions, so a player never has to open the full panel
+  mid-combat.
+- **Selection-aware panel** — when you select your bonded token, the panel could
+  auto-jump to that mech's sheet; selecting an enemy could surface its NPC card.
+- **One-click end-of-turn cleanup** — clear your move/sensor fields + templates in
+  a single button.
+- **Damage drag-and-drop** — drag a damage result onto a token to log/apply it.
+- **Bigger touch targets + a "compact" density toggle** for tablet play.
+
+### Onboarding / tutorial (requested — planning notes)
+A categorical, in-app tutorial for new players. Proposed shape:
+- **Format:** a `?` help button in the header opening a modal (`OBR.modal` or a
+  full-width in-panel overlay) with tabs by category — *Importing a Pilot*, *The
+  Dice Tray*, *Attacks & Overkill*, *Templates & Painting*, *Token Bond & Bars*,
+  *Overcharge*, *The Right-Click Menu*, *GM / Mission Control*.
+- **Each section:** 2–4 short steps, one annotated screenshot each, plus a "try it"
+  link that focuses the relevant control.
+- **What I (Claude) can build now:** the modal/overlay shell, the tab structure,
+  all the explanatory copy, and the "try it" deep-links — text-complete and ready.
+- **What's needed from you (Jack):** the screenshots for each scenario (ideally at
+  a consistent panel size). A list of exactly which shots per section can be
+  generated first so you can capture them in one pass; drop them in `tutorial/img/`
+  and I'll wire them in.
+- **Stretch:** a first-run auto-open (remembered in localStorage), and a
+  "highlight this control" spotlight that dims the rest of the panel.
+
 ### Quality of life / tech health
 - **Settings drawer** gathering the house-rule toggles in one place.
-- **Keyboard shortcuts** — R to roll, C to clear, 1–6 to queue dice.
 - **Collapsible-state memory** — remember which sections you keep closed.
 - **A committed dice-math test harness** — Overkill / crit / Combat Drill are the
   most regression-prone code; a small test file would protect them.
 - **A live Owlbear smoke-test pass** — grid auto-calibration, the token bars, the
-  Move/Erase cursors, and the remote-roll popup all live in the VTT and want a
-  real at-the-table check.
+  Move/Erase cursors, the remote-roll popup and the right-click menu all live in
+  the VTT and want a real at-the-table check.
 
 ---
 
 ## ⚠ Known bugs / watch-list
 
-- **Remote-roll popover positioning is unverified.** The separate on-screen roll
-  window (2.8.9) anchors ~86px from the right edge — a guess at the toolbar width.
-  May need nudging; the ready/closed handshake also wants a real two-client test.
-- **Eraser click-and-drag is imperfect.** Single-click erase is solid; the
-  hold-and-drag pass can miss fast sweeps. Needs tuning.
+- **Right-click "Lancer Uplink" menu is brand-new and untested live.** It depends
+  on the panel having been opened this session (the embed broadcasts commands to
+  it), and it can't *replace* Owlbear's native menu items — it expands beneath them
+  like Owl Trackers. The bonded-token-only filter and the data handshake want a
+  real test.
+- **Remote-roll popover positioning is unverified.** The on-screen roll window
+  (2.8.9) anchors ~86px from the right edge — a guess at the toolbar width.
+- **Eraser click-and-drag is imperfect.** Single-click erase is solid; fast
+  hold-and-drag sweeps can miss. Needs tuning.
+- **Scene-change re-bond matches by exact name** — two differently-named tokens for
+  the same mech won't auto-rebond, and identical names on the same scene pick the
+  first match. Uses a 500ms settle delay that may need tuning on slow loads.
 - **Everything Owlbear/WebGL is untested by the author of these changes** — grid
-  auto-calibration, token bars, paint/pen, the overcharge deck recolor and the
-  popover all want an at-the-table pass.
-- **No multi-profile weapon support** — the first profile is always used.
-- **Token bars can't hover-reveal** — Owlbear exposes no item-hover event, so exact
-  values show on selection only.
+  calibration, token bars, paint/pen, the overcharge recolor, both popovers/embeds.
+- **No multi-profile weapon support**; **token bars can't hover-reveal** (no SDK
+  item-hover event).
 
 ---
+
+## Shipped in 2.8.11 ✓
+
+- ✓ **Bond Selected Token now also Fits the grid to the scene**, centred on the
+  token — one click instead of two
+- ✓ **Auto re-bond + re-fit on scene change**: when Owlbear loads a new scene, if a
+  token with the bonded mech's name exists there (your "Titan" on both the
+  Graveyard and Tavern maps), Uplink re-bonds to it and re-fits the grid
+  automatically
+- ✓ **Right-click "Lancer Uplink" menu on the bonded token** — an embedded panel
+  (like Owl Trackers) with a flip-animated header and **Move / Boost / Sensors**
+  buttons plus a **Weapons** dropdown that drops the chosen weapon's range field.
+  Buttons drive the exact same range-field code as the main panel (via a
+  same-client broadcast), so a keyboard-first player rarely needs to open the full
+  panel. A *More* drawer lists the mech's weapons today; the full mini-compendium
+  is scoped in the roadmap
 
 ## Shipped in 2.8.10 ✓
 

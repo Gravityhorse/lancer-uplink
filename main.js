@@ -12,7 +12,7 @@
 //
 // Lancer rules note: GRIT applies to attack rolls only, never to damage.
 
-import { OBR, CH_ROLL3D, CH_STATUS, META, buildShape, buildLabel, buildPath, Command, CH_RP, CH_RP_READY, CH_RP_CLOSED, RP_POPOVER, RP_POPOVER_URL } from "./sdk.js";
+import { OBR, CH_ROLL3D, CH_STATUS, META, buildShape, buildLabel, buildPath, Command, CH_RP, CH_RP_READY, CH_RP_CLOSED, RP_POPOVER, RP_POPOVER_URL, CM_ID, CM_URL, CH_CM, CH_CM_READY, CH_CM_DATA } from "./sdk.js";
 import * as hex from "./hex.js";
 import * as tool from "./tool.js";
 import {
@@ -981,6 +981,14 @@ async function getBondItem() {
   } catch (_) { return null; }
 }
 
+function applyBond(id, name) {
+  bond = { id, name: name || "token" };
+  updateBondUI();
+  saveState();
+  if (tokenBarsOn) renderTokenBars();
+  refreshContextMenu(); // the right-click "Lancer Uplink" menu follows the bond
+}
+
 $("btn-bond")?.addEventListener("click", async () => {
   if (!obrReady) return setStatus("Owlbear link not ready.", "status-err");
   try {
@@ -989,23 +997,107 @@ $("btn-bond")?.addEventListener("click", async () => {
       return setStatus("Select your mech's token on the map first, then bond it.", "status-err");
     }
     const items = await OBR.scene.items.getItems([sel[0]]);
-    bond = { id: sel[0], name: items[0]?.name || items[0]?.text?.plainText || "token" };
-    updateBondUI();
-    saveState();
-    if (tokenBarsOn) renderTokenBars();
-    setStatus(`Bonded to "${bond.name}".`, "status-ok");
+    applyBond(sel[0], items[0]?.name || items[0]?.text?.plainText || "token");
+    await recalibrate(); // bonding also fits the grid to the scene, centred on the token
+    setStatus(`Bonded to "${bond.name}" — grid fitted.`, "status-ok");
   } catch (e) {
     setStatus("Could not read the selection — open a scene first.", "status-err");
   }
 });
+
+// When the scene changes, re-bond to a token of the SAME name on the new scene
+// (e.g. a "Titan" token that exists in both the Graveyard and Tavern maps) and
+// re-fit the grid. Owlbear fires onReadyChange(true) once the new scene loads.
+async function rebondOnSceneChange() {
+  if (!bond || !bond.name) return;
+  try {
+    const items = await OBR.scene.items.getItems();
+    const want = String(bond.name).trim().toLowerCase();
+    const named = (i) => String(i.name || i.text?.plainText || "").trim().toLowerCase();
+    // prefer an exact name match that's a real token (has an image/position)
+    const match = items.find((i) => named(i) === want && i.position) || items.find((i) => named(i) === want);
+    if (match && match.id !== bond.id) {
+      applyBond(match.id, bond.name);
+      setStatus(`Re-bonded to "${bond.name}" on the new scene.`, "status-ok");
+    }
+  } catch (_) {}
+}
 
 $("btn-unbond")?.addEventListener("click", async () => {
   bond = null;
   updateBondUI();
   saveState();
   if (tokenBarsOn) renderTokenBars();
+  refreshContextMenu();
   for (const kind of Object.keys(activeFields)) await removeField(kind);
 });
+
+// ============================================================ CONTEXT MENU ====
+// A right-click "Lancer Uplink" entry on the bonded token (an embed, like Owl
+// Trackers) with Move / Boost / Sensors / Weapons. The embed is a tiny separate
+// page; its buttons LOCAL-broadcast commands back here so they reuse the EXACT
+// range-field code the panel uses. Recreated whenever the bond changes so it
+// only shows on the bonded token.
+let cmReady = false;
+async function refreshContextMenu() {
+  if (!obrReady) return;
+  try { await OBR.contextMenu.remove(CM_ID); } catch (_) {}
+  cmReady = false;
+  if (!bond || !bond.id) return;
+  try {
+    await OBR.contextMenu.create({
+      id: CM_ID,
+      icons: [{ icon: "/lancer-uplink/icons/tool.svg", label: "Lancer Uplink", filter: { some: [{ key: "id", value: bond.id }] } }],
+      embed: { url: CM_URL, height: 250 },
+    });
+  } catch (e) { console.warn("[LANCER//UPLINK] context menu failed", e); }
+}
+function cmWeapons() {
+  const out = [];
+  if (!currentMech) return out;
+  (currentMech.mounts || []).forEach((mt) => {
+    (mt.weapons || []).forEach((w) => {
+      const spec = weaponTemplateSpec(w);
+      if (spec) out.push({ name: w.name, spec });
+    });
+  });
+  return out;
+}
+function sendCMData() {
+  try {
+    OBR.broadcast.sendMessage(CH_CM_DATA, {
+      name: bond?.name || "",
+      hasPilot: !!currentMech,
+      weapons: cmWeapons().map((w, i) => ({ i, name: w.name, kind: w.spec.field ? "range" : w.spec.shape })),
+    }, { destination: "LOCAL" });
+  } catch (_) {}
+}
+async function cmMove() {
+  if (activeFields.boost) await removeField("boost");
+  if (activeFields.move) { await removeField("move"); moveState = 0; }
+  else { moveState = 1; await toggleField("move", currentMech.stats.speed); }
+  markMobilityActive();
+}
+async function cmBoost() {
+  if (activeFields.move) await removeField("move");
+  if (activeFields.boost) { await removeField("boost"); moveState = 0; }
+  else { moveState = 2; await toggleField("boost", currentMech.stats.speed, true); }
+  markMobilityActive();
+}
+async function handleCM(d) {
+  if (!d || !d.action) return;
+  if (!currentMech) { setStatus("Load a pilot first.", "status-err"); return; }
+  if (d.action === "move") await cmMove();
+  else if (d.action === "boost") await cmBoost();
+  else if (d.action === "sensors") await toggleSensors();
+  else if (d.action === "weapon") {
+    const w = cmWeapons()[d.weapon];
+    if (!w) return;
+    if (w.spec.field) await toggleField("weapon", w.spec.size, false, w.spec.name);
+    else { try { await tool.armTemplate(w.spec); setStatus(`Armed ${w.name} — click the map to place.`, "status-ok"); } catch (_) {} }
+  }
+  sendCMData(); // echo fresh state back to the embed
+}
 
 const fieldColor = (kind) =>
   kind === "sensors" ? "#3da5ff" : kind === "weapon" ? "#d22f3d" : "#5ad17a";
@@ -2894,7 +2986,12 @@ async function start() {
   //    re-AUTO whenever the room's grid itself changes (type / size / dpi).
   try {
     if (await OBR.scene.isReady()) await recalibrate();
-    OBR.scene.onReadyChange((ready) => { if (ready) recalibrate(); });
+    OBR.scene.onReadyChange((ready) => {
+      if (!ready) return;
+      // give the new scene a beat to finish loading its items, then re-bond by
+      // name and re-fit the grid
+      setTimeout(async () => { await rebondOnSceneChange(); await recalibrate(); }, 500);
+    });
     const G = (OBR.scene && OBR.scene.grid) || OBR.grid;
     if (G && typeof G.onChange === "function") G.onChange(() => recalibrate());
   } catch (e) {
@@ -2982,6 +3079,9 @@ async function start() {
     // same-client handshake with the on-screen roll popover
     OBR.broadcast.onMessage(CH_RP_READY, () => { rpOpen = true; flushRollPopup(); });
     OBR.broadcast.onMessage(CH_RP_CLOSED, () => { rpOpen = false; rpBuffer = []; });
+    // right-click context-menu embed: commands + data handshake
+    OBR.broadcast.onMessage(CH_CM, (ev) => handleCM(ev.data));
+    OBR.broadcast.onMessage(CH_CM_READY, () => { cmReady = true; sendCMData(); });
   } catch (e) {
     console.warn("[LANCER//UPLINK] broadcast channels unavailable", e);
   }
@@ -3003,6 +3103,7 @@ async function start() {
     });
   } catch (_) {}
   if (tokenBarsOn) { requestSquadStatus(); renderTokenBars(); }
+  refreshContextMenu(); // restore the right-click menu if a bond was remembered
 
   broadcastStatus();
 }

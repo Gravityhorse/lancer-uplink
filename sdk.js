@@ -20,3 +20,10 @@ export const CH_RP_CLOSED = `${ID}/rp-closed`; // popup → panel: "I idle-close
 // The on-screen popover's id + served URL (base path matches the manifest).
 export const RP_POPOVER = `${ID}/roll-popover`;
 export const RP_POPOVER_URL = "/lancer-uplink/roll-popup.html";
+
+// Right-click "Lancer Uplink" context-menu embed on the bonded token.
+export const CM_ID = `${ID}/ctx-menu`;
+export const CM_URL = "/lancer-uplink/context-menu.html";
+export const CH_CM = `${ID}/cm`;              // embed → panel: a command {action, ...}
+export const CH_CM_READY = `${ID}/cm-ready`;  // embed → panel: "loaded, send me data"
+export const CH_CM_DATA = `${ID}/cm-data`;    // panel → embed: { name, weapons, active }

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lancer Uplink</title>
+  <style>
+    :root {
+      --line: rgba(255,255,255,0.12); --muted: #9aa6b8; --text: #eaf2ff;
+      --good: #5ad17a; --tech: #3da5ff; --crimson: #d22f3d;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+      --font: "Eurostile", "Bahnschrift", "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: transparent; color: var(--text); font-family: var(--font); overflow: hidden; }
+    #cm { padding: 4px 8px 8px; }
+    .cm-head {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      background: none; border: none; border-bottom: 1px solid var(--line);
+      color: var(--text); cursor: pointer; padding: 6px 2px 8px; margin-bottom: 8px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .cm-logo { width: 18px; height: 18px; flex: 0 0 auto; transition: transform 0.42s cubic-bezier(0.4,0,0.2,1); transform-style: preserve-3d; }
+    .cm-head.flipped .cm-logo { transform: rotateY(180deg); }
+    .cm-title { font-size: 13px; letter-spacing: 1.5px; font-weight: 700; }
+    .cm-head:hover .cm-title { color: #bfe6ff; }
+    .cm-body { max-height: 320px; overflow: hidden; transition: max-height 0.34s cubic-bezier(0.4,0,0.2,1), opacity 0.3s; opacity: 1; }
+    .cm-body.collapsed { max-height: 0; opacity: 0; }
+    .cm-row { display: flex; gap: 6px; margin-bottom: 8px; }
+    .cm-btn {
+      flex: 1; background: rgba(255,255,255,0.05); border: 1px solid var(--line); color: var(--text);
+      border-radius: 4px; padding: 7px 6px; font-family: var(--font); font-size: 11px; letter-spacing: 1px;
+      cursor: pointer; transition: background 0.12s, border-color 0.12s;
+    }
+    .cm-btn:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.3); }
+    .cm-btn[data-act="move"]:hover { border-color: var(--good); }
+    .cm-btn[data-act="boost"]:hover { border-color: var(--good); }
+    .cm-btn[data-act="sensors"]:hover { border-color: var(--tech); }
+    .cm-wpn { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+    .cm-wpn select {
+      flex: 1; min-width: 0; background: rgba(0,0,0,0.3); color: var(--text); border: 1px solid var(--line);
+      border-radius: 4px; padding: 6px; font-family: var(--mono); font-size: 11px;
+    }
+    #cm-wpn-go { flex: 0 0 auto; }
+    #cm-wpn-go:hover { border-color: var(--crimson); }
+    .cm-more { width: 100%; background: none; border: 1px solid var(--line); color: var(--muted); border-radius: 4px;
+      padding: 5px; font-family: var(--mono); font-size: 10px; letter-spacing: 1px; cursor: pointer; }
+    .cm-more:hover { color: var(--text); }
+    .cm-more.open { color: var(--text); }
+    .cm-more-body { max-height: 0; overflow: hidden; transition: max-height 0.3s; margin-top: 0; }
+    .cm-more-body.open { max-height: 200px; margin-top: 6px; overflow-y: auto; }
+    .cm-plaque { font-family: var(--mono); font-size: 11px; color: var(--text); background: rgba(255,255,255,0.04);
+      border-left: 2px solid var(--crimson); border-radius: 2px; padding: 4px 7px; margin-bottom: 4px; }
+    .cm-note { font-size: 10px; color: var(--muted); padding: 4px 2px; }
+  </style>
+</head>
+<body>
+  <div id="cm">
+    <button id="cm-head" class="cm-head" title="Collapse / expand">
+      <svg id="cm-logo" class="cm-logo" viewBox="0 0 40 40" aria-hidden="true">
+        <polygon points="20,2 35,11 35,29 20,38 5,29 5,11" fill="none" stroke="#eaf2ff" stroke-width="2.5" stroke-linejoin="round"/>
+        <text x="20" y="26" text-anchor="middle" font-size="13" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#eaf2ff">LU</text>
+      </svg>
+      <span class="cm-title">Lancer Uplink</span>
+    </button>
+    <div id="cm-body" class="cm-body">
+      <div class="cm-row">
+        <button class="cm-btn" data-act="move">MOVE</button>
+        <button class="cm-btn" data-act="boost">BOOST</button>
+        <button class="cm-btn" data-act="sensors">SENSORS</button>
+      </div>
+      <div class="cm-wpn">
+        <select id="cm-weapon" title="Pick a weapon to show its range"></select>
+        <button class="cm-btn" id="cm-wpn-go">RANGE</button>
+      </div>
+      <button id="cm-more" class="cm-more">MORE ▾</button>
+      <div id="cm-more-body" class="cm-more-body"></div>
+    </div>
+  </div>
+  <script type="module" src="./context-menu.js"></script>
+</body>
+</html>
