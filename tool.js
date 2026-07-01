@@ -40,6 +40,7 @@ export const MODES = {
   line: `${ID}/mode-line`,
   paint: `${ID}/mode-paint`,
   pen: `${ID}/mode-pen`,
+  moveto: `${ID}/mode-moveto`,
   erase: `${ID}/mode-erase`,
 };
 
@@ -533,6 +534,71 @@ function penMode(icon) {
   };
 }
 
+// ---- Move To -----------------------------------------------------------------
+// While the bonded token has an active move/boost field, hovering a VALID tile
+// drops a bright marker that follows the cursor (a local item on a low layer,
+// beneath tokens but hittable). Left-click jumps the token there; the marker is
+// also right-clickable for a "Move Here" context-menu item (registered in
+// main.js). main.js feeds the range via setMoveContext.
+let moveCtx = null; // { tokenId, centerHex, range } | null
+export function setMoveContext(ctx) {
+  moveCtx = ctx && ctx.tokenId ? ctx : null;
+  if (!moveCtx) requestMoveMarker(null);
+}
+export function clearMoveMarker() { requestMoveMarker(null); }
+
+let mmBusy = false, mmNext = null; // { hex } | { clear:true } | null
+function requestMoveMarker(hex) { mmNext = hex ? { hex } : { clear: true }; pumpMoveMarker(); }
+async function pumpMoveMarker() {
+  if (mmBusy || !mmNext) return;
+  mmBusy = true;
+  const job = mmNext; mmNext = null;
+  try {
+    const old = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === "moveto");
+    if (old.length) await OBR.scene.local.deleteItems(old.map((i) => i.id));
+    if (job.hex) {
+      const dest = hexToPixel(job.hex);
+      const item = buildHexOverlay([job.hex], {
+        color: "#7dffa6", fillOpacity: 0.42, strokeOpacity: 1, strokeWidth: 6,
+        name: "Move here", kind: "moveto", layer: "DRAWING",
+        draggable: true,            // hittable → right-clickable for "Move Here"
+        extra: { dest },            // the pixel the token jumps to
+      });
+      await OBR.scene.local.addItems([item]);
+    }
+  } catch (_) {}
+  mmBusy = false;
+  if (mmNext) pumpMoveMarker();
+}
+async function moveBondedTo(hex) {
+  if (!moveCtx || !moveCtx.tokenId) return;
+  const p = hexToPixel(hex);
+  try {
+    await OBR.scene.items.updateItems([moveCtx.tokenId], (items) =>
+      items.forEach((i) => { i.position = { x: p.x, y: p.y }; }) // position updates DO re-render
+    );
+  } catch (_) {}
+}
+function movetoMode(icon) {
+  const valid = (h) => moveCtx && hexDistance(moveCtx.centerHex, h) <= moveCtx.range;
+  return {
+    id: MODES.moveto,
+    icons: [{ icon, label: "Move To", filter: { activeTools: [TOOL] } }],
+    cursors: [{ cursor: "pointer" }],
+    async onToolMove(_c, ev) {
+      if (!moveCtx) return requestMoveMarker(null);
+      const h = pixelToHex(ev.pointerPosition);
+      requestMoveMarker(valid(h) ? h : null);
+    },
+    async onToolClick(_c, ev) {
+      if (!moveCtx) return;
+      const h = pixelToHex(ev.pointerPosition);
+      if (valid(h)) { await moveBondedTo(h); requestMoveMarker(null); }
+    },
+    onDeactivate() { requestMoveMarker(null); },
+  };
+}
+
 // ---- eraser (group-aware) ------------------------------------------------------------------
 // Removes the WHOLE template group (path + label + origin marker) of whatever
 // you click, plus painted tiles. Range fields are cleared from the panel.
@@ -611,6 +677,7 @@ export async function registerTool() {
   await OBR.tool.createMode(directionalMode("line", iconUrl("line.svg"), hexLine, false));
   await OBR.tool.createMode(paintMode(iconUrl("paint.svg")));
   await OBR.tool.createMode(penMode(iconUrl("pen.svg"))); // freehand draw, no snapping
+  await OBR.tool.createMode(movetoMode(iconUrl("moveto.svg"))); // hover-to-move the bonded token
   // (Colour is the shared Template Color chosen from the panel — see PAINT_COLORS.)
 
   // white eraser cursor (data-URI SVG) — replaces the red "not-allowed" circle

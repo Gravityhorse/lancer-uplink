@@ -110,11 +110,15 @@ A categorical, in-app tutorial for new players. Proposed shape:
 
 ## ⚠ Known bugs / watch-list
 
-- **Right-click "Lancer Uplink" menu is brand-new and untested live.** It depends
-  on the panel having been opened this session (the embed broadcasts commands to
-  it), and it can't *replace* Owlbear's native menu items — it expands beneath them
-  like Owl Trackers. The bonded-token-only filter and the data handshake want a
-  real test.
+- **Right-click menus are new and untested live.** The "Lancer Uplink" embed
+  depends on the panel having been opened this session (the buttons broadcast to
+  it) and can't *replace* Owlbear's native items — it expands beneath them like Owl
+  Trackers. "Bond Token" / "Move Here" use `onClick`, which likewise needs the panel
+  context alive.
+- **"Move Here" right-click may not fire on the marker.** The marker is a LOCAL
+  item; it's unconfirmed whether Owlbear shows context menus on local items. If it
+  doesn't, use **left-click** in the Move To mode instead (that path is solid). Also
+  needs the LANCER tool + Move To mode selected, and a move/boost field up.
 - **Remote-roll popover positioning is unverified.** The on-screen roll window
   (2.8.9) anchors ~86px from the right edge — a guess at the toolbar width.
 - **Eraser click-and-drag is imperfect.** Single-click erase is solid; fast
@@ -137,13 +141,18 @@ A categorical, in-app tutorial for new players. Proposed shape:
   token with the bonded mech's name exists there (your "Titan" on both the
   Graveyard and Tavern maps), Uplink re-bonds to it and re-fits the grid
   automatically
-- ✓ **Right-click "Lancer Uplink" menu on the bonded token** — an embedded panel
-  (like Owl Trackers) with a flip-animated header and **Move / Boost / Sensors**
-  buttons plus a **Weapons** dropdown that drops the chosen weapon's range field.
-  Buttons drive the exact same range-field code as the main panel (via a
-  same-client broadcast), so a keyboard-first player rarely needs to open the full
-  panel. A *More* drawer lists the mech's weapons today; the full mini-compendium
-  is scoped in the roadmap
+- ✓ **"Bond Token" on any token's right-click menu** — quick-bond straight from the
+  map (fits the grid too), no need to open the panel first
+- ✓ **Right-click "Lancer Uplink" menu on the bonded token** — a minimal embed (like
+  Owl Trackers) that pops **Move / Boost / Sensors** on hover, flip-animated header.
+  Trimmed to just those three (the weapons dropdown / More drawer were too much);
+  the buttons drive the exact same range-field code as the panel via a same-client
+  broadcast
+- ✓ **"Move To" tool mode + "Move Here" pseudo-token** — with a move/boost field up,
+  the Move To mode (map-pin icon in the LANCER toolbar) drops a bright marker on
+  the valid tile under your cursor; left-click jumps the bonded token there, and the
+  marker is also right-clickable for a **Move Here** action. Token moves via a
+  position update (which re-renders reliably)
 
 ## Shipped in 2.8.10 ✓
 

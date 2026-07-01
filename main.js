@@ -1033,44 +1033,22 @@ $("btn-unbond")?.addEventListener("click", async () => {
 });
 
 // ============================================================ CONTEXT MENU ====
-// A right-click "Lancer Uplink" entry on the bonded token (an embed, like Owl
-// Trackers) with Move / Boost / Sensors / Weapons. The embed is a tiny separate
-// page; its buttons LOCAL-broadcast commands back here so they reuse the EXACT
-// range-field code the panel uses. Recreated whenever the bond changes so it
-// only shows on the bonded token.
-let cmReady = false;
+// Two right-click entries:
+//  • "Bond Token" on ANY token — quick-bond it (+ fit the grid).
+//  • "Lancer Uplink" on the BONDED token — a tiny embed (like Owl Trackers) that
+//    pops Move / Boost / Sensors on hover; its buttons LOCAL-broadcast back here
+//    so they reuse the exact range-field code the panel uses.
 async function refreshContextMenu() {
   if (!obrReady) return;
   try { await OBR.contextMenu.remove(CM_ID); } catch (_) {}
-  cmReady = false;
   if (!bond || !bond.id) return;
   try {
     await OBR.contextMenu.create({
       id: CM_ID,
       icons: [{ icon: "/lancer-uplink/icons/tool.svg", label: "Lancer Uplink", filter: { some: [{ key: "id", value: bond.id }] } }],
-      embed: { url: CM_URL, height: 250 },
+      embed: { url: CM_URL, height: 112 }, // just the header + Move/Boost/Sensors
     });
   } catch (e) { console.warn("[LANCER//UPLINK] context menu failed", e); }
-}
-function cmWeapons() {
-  const out = [];
-  if (!currentMech) return out;
-  (currentMech.mounts || []).forEach((mt) => {
-    (mt.weapons || []).forEach((w) => {
-      const spec = weaponTemplateSpec(w);
-      if (spec) out.push({ name: w.name, spec });
-    });
-  });
-  return out;
-}
-function sendCMData() {
-  try {
-    OBR.broadcast.sendMessage(CH_CM_DATA, {
-      name: bond?.name || "",
-      hasPilot: !!currentMech,
-      weapons: cmWeapons().map((w, i) => ({ i, name: w.name, kind: w.spec.field ? "range" : w.spec.shape })),
-    }, { destination: "LOCAL" });
-  } catch (_) {}
 }
 async function cmMove() {
   if (activeFields.boost) await removeField("boost");
@@ -1090,13 +1068,39 @@ async function handleCM(d) {
   if (d.action === "move") await cmMove();
   else if (d.action === "boost") await cmBoost();
   else if (d.action === "sensors") await toggleSensors();
-  else if (d.action === "weapon") {
-    const w = cmWeapons()[d.weapon];
-    if (!w) return;
-    if (w.spec.field) await toggleField("weapon", w.spec.size, false, w.spec.name);
-    else { try { await tool.armTemplate(w.spec); setStatus(`Armed ${w.name} — click the map to place.`, "status-ok"); } catch (_) {} }
-  }
-  sendCMData(); // echo fresh state back to the embed
+}
+
+// Created ONCE: "Bond Token" on any token, and "Move Here" on the Move To marker.
+let staticCMDone = false;
+async function setupStaticContextMenus() {
+  if (!obrReady || staticCMDone) return;
+  staticCMDone = true;
+  try {
+    await OBR.contextMenu.create({
+      id: `${CM_ID}-bond`,
+      icons: [{ icon: "/lancer-uplink/icons/tool.svg", label: "Bond Token", filter: { max: 1, every: [{ key: "layer", value: "CHARACTER" }] } }],
+      onClick: async (context) => {
+        const it = context.items && context.items[0];
+        if (!it) return;
+        applyBond(it.id, it.name || it.text?.plainText || "token");
+        try { await recalibrate(); } catch (_) {}
+        setStatus(`Bonded to "${bond.name}" — grid fitted.`, "status-ok");
+      },
+    });
+  } catch (e) { console.warn("[LANCER//UPLINK] bond context menu failed", e); }
+  try {
+    await OBR.contextMenu.create({
+      id: `${CM_ID}-movehere`,
+      icons: [{ icon: "/lancer-uplink/icons/moveto.svg", label: "Move Here", filter: { every: [{ key: ["metadata", META, "kind"], value: "moveto" }] } }],
+      onClick: async (context) => {
+        const m = context.items && context.items[0];
+        const dest = m?.metadata?.[META]?.dest;
+        if (!dest || !bond?.id) return;
+        try { await OBR.scene.items.updateItems([bond.id], (items) => items.forEach((i) => { i.position = { ...dest }; })); } catch (_) {}
+        tool.clearMoveMarker?.();
+      },
+    });
+  } catch (e) { console.warn("[LANCER//UPLINK] move-here context menu failed", e); }
 }
 
 const fieldColor = (kind) =>
@@ -1181,6 +1185,20 @@ function markMobilityActive() {
     b.classList.toggle("on", !!activeFields.sensors);
   });
   updateDragOffsetBtn(); // offset toggle availability tracks the fields
+  updateMoveContext();   // let the Move To tool know the current reach
+}
+
+// Feed the Move To tool the bonded token's current move/boost reach so hovering
+// a valid tile can drop the "Move Here" marker. Cleared when no move field is up.
+async function updateMoveContext() {
+  try {
+    const speed = currentMech?.stats?.speed || 0;
+    const range = activeFields.boost ? speed * 2 : activeFields.move ? speed : 0;
+    if (!range || !bond?.id) { tool.setMoveContext?.(null); return; }
+    const item = await getBondItem();
+    if (!item || !item.position) { tool.setMoveContext?.(null); return; }
+    tool.setMoveContext?.({ tokenId: bond.id, centerHex: hex.pixelToHex(item.position), range });
+  } catch (_) { tool.setMoveContext?.(null); }
 }
 
 // ---- MOVE & SENSORS row (above the stat blocks, below the name) --------------
@@ -3079,9 +3097,8 @@ async function start() {
     // same-client handshake with the on-screen roll popover
     OBR.broadcast.onMessage(CH_RP_READY, () => { rpOpen = true; flushRollPopup(); });
     OBR.broadcast.onMessage(CH_RP_CLOSED, () => { rpOpen = false; rpBuffer = []; });
-    // right-click context-menu embed: commands + data handshake
+    // right-click context-menu embed: Move / Boost / Sensors commands
     OBR.broadcast.onMessage(CH_CM, (ev) => handleCM(ev.data));
-    OBR.broadcast.onMessage(CH_CM_READY, () => { cmReady = true; sendCMData(); });
   } catch (e) {
     console.warn("[LANCER//UPLINK] broadcast channels unavailable", e);
   }
@@ -3103,7 +3120,8 @@ async function start() {
     });
   } catch (_) {}
   if (tokenBarsOn) { requestSquadStatus(); renderTokenBars(); }
-  refreshContextMenu(); // restore the right-click menu if a bond was remembered
+  setupStaticContextMenus(); // "Bond Token" on any token + "Move Here" on the marker
+  refreshContextMenu();      // restore the "Lancer Uplink" menu if a bond was remembered
 
   broadcastStatus();
 }
