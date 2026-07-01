@@ -540,31 +540,64 @@ function penMode(icon) {
 // beneath tokens but hittable). Left-click jumps the token there; the marker is
 // also right-clickable for a "Move Here" context-menu item (registered in
 // main.js). main.js feeds the range via setMoveContext.
-let moveCtx = null; // { tokenId, centerHex, range } | null
+// moveCtx.valid is the EXACT set of hexKeys the move/boost field covers (built in
+// main.js and refreshed whenever the field or the token moves) — so validity can
+// never drift past the visible field, and there's no distance math to get wrong.
+let moveCtx = null; // { tokenId, valid: Set<hexKey> } | null
+const moveValid = (h) => !!(moveCtx && moveCtx.valid && moveCtx.valid.has(hexKey(h)));
 export function setMoveContext(ctx) {
-  moveCtx = ctx && ctx.tokenId ? ctx : null;
+  moveCtx = ctx && ctx.tokenId && ctx.valid ? ctx : null;
   if (!moveCtx) requestMoveMarker(null);
 }
 export function clearMoveMarker() { requestMoveMarker(null); }
 
-let mmBusy = false, mmNext = null; // { hex } | { clear:true } | null
+// The marker's shape is a single hex/cell centred at ITS OWN origin, so we can
+// slide it by updating `position` (which re-renders) instead of delete+add on
+// every mouse move — that delete+add was the flicker.
+function markerCorners() {
+  if (grid.square) {
+    const hs = grid.S / 2;
+    return [{ x: -hs, y: -hs }, { x: hs, y: -hs }, { x: hs, y: hs }, { x: -hs, y: hs }];
+  }
+  const R = grid.R, start = grid.pointy ? -90 : 0, pts = [];
+  for (let i = 0; i < 6; i++) { const a = ((start + i * 60) * Math.PI) / 180; pts.push({ x: R * Math.cos(a), y: R * Math.sin(a) }); }
+  return pts;
+}
+function moveMarkerItem(c) {
+  const pts = markerCorners();
+  const cmds = [[Command.MOVE, pts[0].x, pts[0].y]];
+  for (let i = 1; i < pts.length; i++) cmds.push([Command.LINE, pts[i].x, pts[i].y]);
+  cmds.push([Command.CLOSE]);
+  return buildPath().position({ x: c.x, y: c.y }).commands(cmds)
+    .fillColor("#7dffa6").fillOpacity(0.4).strokeColor("#7dffa6").strokeOpacity(1).strokeWidth(Math.max(2, (grid.dpi || 150) * 0.03))
+    .fillRule("evenodd").layer("DRAWING").name("Move here").locked(false).disableHit(false)
+    .metadata({ [META]: { kind: "moveto", dest: { x: c.x, y: c.y } } }).build();
+}
+
+let mmId = null, mmBusy = false, mmNext = null; // mmNext: { hex } | { clear:true } | null
 function requestMoveMarker(hex) { mmNext = hex ? { hex } : { clear: true }; pumpMoveMarker(); }
 async function pumpMoveMarker() {
   if (mmBusy || !mmNext) return;
   mmBusy = true;
   const job = mmNext; mmNext = null;
   try {
-    const old = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === "moveto");
-    if (old.length) await OBR.scene.local.deleteItems(old.map((i) => i.id));
-    if (job.hex) {
-      const dest = hexToPixel(job.hex);
-      const item = buildHexOverlay([job.hex], {
-        color: "#7dffa6", fillOpacity: 0.42, strokeOpacity: 1, strokeWidth: 6,
-        name: "Move here", kind: "moveto", layer: "DRAWING",
-        draggable: true,            // hittable → right-clickable for "Move Here"
-        extra: { dest },            // the pixel the token jumps to
-      });
-      await OBR.scene.local.addItems([item]);
+    if (job.clear) {
+      const old = await OBR.scene.local.getItems((i) => i.metadata?.[META]?.kind === "moveto");
+      if (old.length) await OBR.scene.local.deleteItems(old.map((i) => i.id));
+      mmId = null;
+    } else {
+      const c = hexToPixel(job.hex);
+      if (mmId) {
+        // slide it — position updates re-render smoothly (no flicker)
+        await OBR.scene.local.updateItems([mmId], (items) => items.forEach((it) => {
+          it.position = { x: c.x, y: c.y };
+          it.metadata = { ...(it.metadata || {}), [META]: { kind: "moveto", dest: { x: c.x, y: c.y } } };
+        }));
+      } else {
+        const item = moveMarkerItem(c);
+        mmId = item.id;
+        await OBR.scene.local.addItems([item]);
+      }
     }
   } catch (_) {}
   mmBusy = false;
@@ -580,7 +613,6 @@ async function moveBondedTo(hex) {
   } catch (_) {}
 }
 function movetoMode(icon) {
-  const valid = (h) => moveCtx && hexDistance(moveCtx.centerHex, h) <= moveCtx.range;
   return {
     id: MODES.moveto,
     icons: [{ icon, label: "Move To", filter: { activeTools: [TOOL] } }],
@@ -588,12 +620,12 @@ function movetoMode(icon) {
     async onToolMove(_c, ev) {
       if (!moveCtx) return requestMoveMarker(null);
       const h = pixelToHex(ev.pointerPosition);
-      requestMoveMarker(valid(h) ? h : null);
+      requestMoveMarker(moveValid(h) ? h : null);
     },
     async onToolClick(_c, ev) {
       if (!moveCtx) return;
       const h = pixelToHex(ev.pointerPosition);
-      if (valid(h)) { await moveBondedTo(h); requestMoveMarker(null); }
+      if (moveValid(h)) { await moveBondedTo(h); requestMoveMarker(null); }
     },
     onDeactivate() { requestMoveMarker(null); },
   };

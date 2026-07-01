@@ -1188,8 +1188,9 @@ function markMobilityActive() {
   updateMoveContext();   // let the Move To tool know the current reach
 }
 
-// Feed the Move To tool the bonded token's current move/boost reach so hovering
-// a valid tile can drop the "Move Here" marker. Cleared when no move field is up.
+// Feed the Move To tool the EXACT set of tiles the current move/boost field
+// covers, computed from the token's LIVE position — so the "Move Here" marker can
+// never validate past the field, and it stays correct after the token moves.
 async function updateMoveContext() {
   try {
     const speed = currentMech?.stats?.speed || 0;
@@ -1197,7 +1198,9 @@ async function updateMoveContext() {
     if (!range || !bond?.id) { tool.setMoveContext?.(null); return; }
     const item = await getBondItem();
     if (!item || !item.position) { tool.setMoveContext?.(null); return; }
-    tool.setMoveContext?.({ tokenId: bond.id, centerHex: hex.pixelToHex(item.position), range });
+    const center = hex.pixelToHex(item.position);
+    const valid = new Set(hex.hexesInRange(center, range, true).map(hex.hexKey));
+    tool.setMoveContext?.({ tokenId: bond.id, valid });
   } catch (_) { tool.setMoveContext?.(null); }
 }
 
@@ -2847,6 +2850,7 @@ async function refreshActiveFieldsNow() {
   for (const [kind, f] of Object.entries(activeFields)) {
     await placeFieldAt(kind, c, f.size, f.boost);
   }
+  updateMoveContext(); // keep the Move To reach aligned after a re-place
 }
 let refreshFieldsTimer = 0;
 function refreshActiveFields() {
@@ -3039,6 +3043,7 @@ async function start() {
         for (const [kind, f] of Object.entries(activeFields)) {
           await placeFieldAt(kind, c, f.size, f.boost);
         }
+        updateMoveContext(); // recentre the Move To reach on the token's new tile
       }, 250);
     });
   } catch (_) {}
