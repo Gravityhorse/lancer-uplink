@@ -89,13 +89,21 @@ export async function calibrate(anchor) {
   applyMode();
 
   try {
-    // Snap a point to find one true cell center — this anchors the whole
+    // Snap a point to find one true cell CENTER — this anchors the whole
     // lattice, which is what makes templates land ON the scene's grid. Seed it
     // with the bonded token when we have one so the origin centres on it.
+    //
+    // CRITICAL: force full sensitivity + centre-only snapping (1, useCorners:
+    // false, useCenter: true). The defaults use the *player's* snap preference,
+    // so if they play with snapping low/off — or the token was dropped off-centre
+    // in its tile — snapPosition would hand back the raw off-centre point and the
+    // whole hex lattice would inherit that offset. Centre-snapping pins us to the
+    // middle of the tile the token actually occupies, no matter where in the tile
+    // it sits.
     const seed = anchor && Number.isFinite(anchor.x) && Number.isFinite(anchor.y)
       ? { x: anchor.x, y: anchor.y }
       : { x: 5000.37, y: 4097.91 };
-    const c0 = await G.snapPosition(seed);
+    const c0 = await G.snapPosition(seed, 1, false, true);
     grid.origin = c0;
 
     if (grid.isHexGrid) {
@@ -108,7 +116,7 @@ export async function calibrate(anchor) {
         const p = await G.snapPosition({
           x: c0.x + probeDist * Math.cos(rad),
           y: c0.y + probeDist * Math.sin(rad),
-        });
+        }, 1, false, true); // centre-to-centre spacing
         const dx = p.x - c0.x, dy = p.y - c0.y;
         const d = Math.hypot(dx, dy);
         if (d > 1) neighbors.push({ d, ang: Math.atan2(dy, dx) });
@@ -122,7 +130,7 @@ export async function calibrate(anchor) {
       }
     } else {
       // Square: measure cell size from a horizontal probe.
-      const p = await G.snapPosition({ x: c0.x + grid.dpi * 1.02, y: c0.y });
+      const p = await G.snapPosition({ x: c0.x + grid.dpi * 1.02, y: c0.y }, 1, false, true);
       const d = Math.abs(p.x - c0.x);
       if (d > 1) grid.S = d;
     }

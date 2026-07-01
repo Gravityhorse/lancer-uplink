@@ -1046,7 +1046,7 @@ async function refreshContextMenu() {
     await OBR.contextMenu.create({
       id: CM_ID,
       icons: [{ icon: "/lancer-uplink/icons/tool.svg", label: "Lancer Uplink", filter: { some: [{ key: "id", value: bond.id }] } }],
-      embed: { url: CM_URL, height: 112 }, // just the header + Move/Boost/Sensors
+      embed: { url: CM_URL, height: 52 }, // just the Move/Boost/Sensors row
     });
   } catch (e) { console.warn("[LANCER//UPLINK] context menu failed", e); }
 }
