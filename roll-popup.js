@@ -28,7 +28,16 @@ OBR.onReady(async () => {
   try { OBR.broadcast.onMessage(CH_RP, (ev) => enqueue(ev.data)); } catch (_) {}
   // tell the panel we're alive — it will (re)send any pending rolls
   try { OBR.broadcast.sendMessage(CH_RP_READY, {}, { destination: "LOCAL" }); } catch (_) {}
+  const close = document.getElementById("rp-close");
+  if (close) close.addEventListener("click", closeNow);
 });
+
+async function closeNow() {
+  clearTimeout(idleTimer);
+  queue = [];
+  try { OBR.broadcast.sendMessage(CH_RP_CLOSED, {}, { destination: "LOCAL" }); } catch (_) {}
+  try { await OBR.popover.close(RP_POPOVER); } catch (_) {}
+}
 
 function enqueue(d) {
   if (!d || !d.uid || seen.has(d.uid)) return;

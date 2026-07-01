@@ -133,6 +133,42 @@ A categorical, in-app tutorial for new players. Proposed shape:
 
 ---
 
+## Shipped in 2.8.12 ✓
+
+- ✓ **"Move Lancer" right-click button** — the fourth entry in the bonded token's
+  Lancer Uplink menu forces the Boost field up (even if Boost was already on) and
+  arms the Move To tool, so a whole turn of movement is right-click → click-a-tile
+- ✓ **Close button on the multiplayer roll popover** — an ✕ top-right so you don't
+  have to wait out the auto-close
+- ✓ **Right-click menu de-duped** — dropped the redundant "Lancer Uplink" header
+  inside the embed (the menu row already says it); off-center grid fix (centre-only
+  snapping) from the same pass
+- ✓ **Tutorial — foundation**: a **Tutorial** button at the top of House Rules opens
+  a categorised, ELI5 walkthrough overlay (Start / Pilot / Dice / Map / Tokens /
+  Overcharge / GM). Steps can be prose, an **Under Construction** screenshot
+  placeholder (with the exact `tutorial/img/…` path + filename to upload), or a
+  **guide** that switches to the right tab, scrolls the real control into view,
+  pulse-highlights it and floats an arrow that tracks scrolling
+- ✓ **"Enable Tutorial Popup Dialogue" toggle** (off by default) — an opt-in layer
+  of lavender help pop-ups across the panel (tabs, ROLL, ACC/DIF, Bond, template
+  controls, House Rules toggles…). The existing chip tooltips stay ALWAYS on; this
+  is a separate `setupHelpTooltips()` chunk gated by the toggle. The "auto
+  structure/overheat" explanation moved out of the House Rules body into its hover
+  tip
+
+### Tutorial — still to do (needs you + a later pass)
+- **Screenshots**: the Under Construction slides name exactly what to capture and
+  where to drop it (`tutorial/img/pilot-sheet.png`, `overkill.png`,
+  `mission-control.png`). Add them and they appear automatically. More slides can
+  be turned into screenshot steps the same way.
+- **Immersive arrow choreography**: right now a guide step auto-scrolls the control
+  into view + highlights + points. The fuller "make the player scroll up, then
+  click the tab, then scroll down" step-by-step is scaffolded (arrow + highlight +
+  scroll-tracking are in place) but not yet sequenced per control.
+- **Extend `data-help` coverage**: the opt-in tips cover a representative set; add
+  more selectors to the `HELP` map / `data-help` attributes to blanket every
+  control.
+
 ## Shipped in 2.8.11 ✓
 
 - ✓ **Bond Selected Token now also Fits the grid to the scene**, centred on the

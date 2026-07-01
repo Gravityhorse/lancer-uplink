@@ -77,6 +77,7 @@ function saveState() {
         tokenBars: tokenBarsOn,
         overcharge: $("overcharge-toggle")?.checked || false,
         hideRemoteRolls: $("remoteroll-toggle")?.checked || false,
+        tutDialogue: $("tut-dialogue-toggle")?.checked || false,
         bond,
       }));
     } catch (_) { /* storage may be unavailable in some embeds */ }
@@ -1046,7 +1047,7 @@ async function refreshContextMenu() {
     await OBR.contextMenu.create({
       id: CM_ID,
       icons: [{ icon: "/lancer-uplink/icons/tool.svg", label: "Lancer Uplink", filter: { some: [{ key: "id", value: bond.id }] } }],
-      embed: { url: CM_URL, height: 52 }, // just the Move/Boost/Sensors row
+      embed: { url: CM_URL, height: 92 }, // Move/Boost/Sensors + Move Lancer
     });
   } catch (e) { console.warn("[LANCER//UPLINK] context menu failed", e); }
 }
@@ -1068,6 +1069,20 @@ async function handleCM(d) {
   if (d.action === "move") await cmMove();
   else if (d.action === "boost") await cmBoost();
   else if (d.action === "sensors") await toggleSensors();
+  else if (d.action === "movelancer") {
+    // ensure the boost field is up (even if boost was already active), then arm
+    // the Move To tool so any in-range tile is click-to-move
+    if (!activeFields.boost) {
+      if (activeFields.move) await removeField("move");
+      moveState = 2;
+      await toggleField("boost", currentMech.stats.speed, true);
+      markMobilityActive();
+    } else {
+      updateMoveContext();
+    }
+    try { await tool.activateMode("moveto"); } catch (_) {}
+    setStatus("MOVE LANCER — boost range up. Click any tile in range to move.", "status-ok");
+  }
 }
 
 // Created ONCE: "Bond Token" on any token, and "Move Here" on the Move To marker.
@@ -2451,6 +2466,7 @@ function setOverchargeEnabled(on) {
 setOverchargeEnabled(false); // default OFF until the player opts in
 $("overcharge-toggle")?.addEventListener("change", () => { setOverchargeEnabled($("overcharge-toggle").checked); saveState(); });
 $("remoteroll-toggle")?.addEventListener("change", saveState);
+$("tut-dialogue-toggle")?.addEventListener("change", saveState);
 
 // FIRE: chains the locked weapon's damage right after its accuracy roll.
 // Respects the CRIT and OVERKILL toggles, so a crit confirmed by other means
@@ -2990,6 +3006,165 @@ async function recalibrate() {
   }
 }
 
+// ============================================================ TUTORIAL ========
+// A categorised, data-driven walkthrough. Each step is either prose, an "under
+// construction" screenshot placeholder, or a GUIDE (switch to the right tab,
+// scroll the real control into view, pulse-highlight it, and float an arrow at
+// it — the arrow tracks scrolling). ELI5 language throughout. Content is easy to
+// extend: just add steps/categories to TUTORIAL.
+const TUTORIAL = [
+  { cat: "Start", steps: [
+    { title: "Welcome, Lancer", body: "<p>This panel is your mech's cockpit inside Owlbear Rodeo. It has three tabs: <b>PILOT</b> (your sheet), <b>DICE</b> (rolling), and <b>MAP</b> (movement &amp; templates).</p><p>Use <b>Next</b> to page through, or tap a category above to jump around. Hit <b>✕</b> any time to close.</p>" },
+    { title: "The three tabs", body: "<p>These are the tabs. The glowing one is where you'll spend most of your time. Click <b>PILOT</b> to load your mech.</p>", guide: { sel: 'nav.tabs button[data-tab="pilot"]' } },
+  ]},
+  { cat: "Pilot", steps: [
+    { title: "Import your pilot", body: "<p>In <b>COMP/CON</b>, export your pilot (<i>Pilot Roster → Export → Download pilot as JSON</i>). Then open the <b>IMPORT</b> section here and pick that file.</p>", guide: { tab: "pilot", sel: "#sec-import" } },
+    { title: "Read your sheet", uc: { path: "tutorial/img/pilot-sheet.png", name: "pilot-sheet.png" } },
+    { title: "Switch mechs / go on foot", body: "<p>If your pilot has more than one mech — or you want to fight on foot — use the <b>Active Mech</b> dropdown at the top of the sheet.</p>" },
+  ]},
+  { cat: "Dice", steps: [
+    { title: "Roll some dice", body: "<p>The <b>DICE</b> tab is a real 3D tray. Tap dice to queue them, then hit <b>ROLL</b>. Accuracy (+) and Difficulty (−) cancel out and only the highest one counts — the Lancer way.</p>", guide: { tab: "dice", sel: "#rolldice" } },
+    { title: "Attacks from the sheet", body: "<p>Every weapon on your sheet has <b>ATK</b> (to-hit), <b>DMG</b> (damage), a target-lock ⬢, and a template ◈. They all roll through the same tray so the table can watch.</p>" },
+    { title: "Overkill &amp; crits", uc: { path: "tutorial/img/overkill.png", name: "overkill.png" } },
+  ]},
+  { cat: "Map", steps: [
+    { title: "Bond your token", body: "<p>Select your mech's token on the map, then hit <b>BOND SELECTED TOKEN</b> (or right-click the token → <b>Bond Token</b>). Now Move/Sensor ranges snap to it and the grid fits itself to the scene.</p>", guide: { tab: "map", sel: "#btn-bond" } },
+    { title: "Move &amp; Sensors", body: "<p><b>MOVE</b> shows your speed in green (tap again for Boost = double). <b>SENSORS</b> shows your scan range in blue. Only you see these.</p>" },
+    { title: "Templates &amp; colour", body: "<p>Pick the <b>LANCER</b> tool in Owlbear's left toolbar to drop Blast / Cone / Line templates, Paint difficult terrain, or free-draw with the Pen. <b>TEMPLATE COLOR</b> sets the colour for all of them.</p>", guide: { tab: "map", sel: "#tplcolor-toggle" } },
+  ]},
+  { cat: "Tokens", steps: [
+    { title: "Live HP / Heat bars", body: "<p>Turn on <b>LIVE HP / HEAT BARS</b> in House Rules to float little blue HP and orange Heat bars over every bonded token, so the whole table can read health at a glance.</p>", guide: { tab: "map", sel: "#tokenbars-toggle" } },
+    { title: "Right-click your token", body: "<p>Right-click your bonded token for a mini <b>Lancer Uplink</b> menu: <b>Move</b>, <b>Boost</b>, <b>Sensors</b>, and <b>Move Lancer</b> (boost range + click-to-move). Fast access without opening the whole panel.</p>" },
+  ]},
+  { cat: "Overcharge", steps: [
+    { title: "Turn it on", body: "<p>Overcharge is optional. Flip <b>OVERCHARGE DICE</b> in House Rules to reveal the orange OC button by the dice, and a 0–4 level meter.</p>", guide: { tab: "dice", sel: "#overcharge-toggle" } },
+    { title: "How it works", body: "<p>Each Overcharge costs escalating Heat: <b>1 → 1d3 → 1d6 → 1d6+4</b>. The first is instant; the rest prime a molten die you fire with ROLL. The reactor deck glows red while it's hot. <b>CLEAR OC</b> resets it after a full rest.</p>" },
+  ]},
+  { cat: "GM", steps: [
+    { title: "Mission Control", uc: { path: "tutorial/img/mission-control.png", name: "mission-control.png" } },
+    { title: "That's the tour", body: "<p>That's the essentials! Flip on <b>Enable Tutorial Popup Dialogue</b> in House Rules and hover anything to get a plain-English explanation as you go. Have fun out there, Lancer.</p>" },
+  ]},
+];
+
+let tutC = 0, tutS = 0, tutHl = null;
+const tutOverlay = () => $("tutorial-overlay");
+const tutSteps = () => (TUTORIAL[tutC]?.steps || []);
+
+function openTutorial() { tutC = 0; tutS = 0; renderTut(); tutOverlay()?.classList.remove("hidden"); }
+function closeTutorial() {
+  tutOverlay()?.classList.add("hidden");
+  tutOverlay()?.classList.remove("peek");
+  clearTutHighlight();
+  $("tut-arrow")?.classList.add("hidden");
+}
+function clearTutHighlight() { if (tutHl) { tutHl.classList.remove("tut-highlight"); tutHl = null; } }
+
+function renderTut() {
+  const cat = TUTORIAL[tutC]; if (!cat) return;
+  const step = cat.steps[tutS]; if (!step) return;
+  const catsEl = $("tut-cats");
+  if (catsEl) {
+    catsEl.innerHTML = TUTORIAL.map((c, i) => `<button class="tut-cat ${i === tutC ? "sel" : ""}" data-cat="${i}">${c.cat}</button>`).join("");
+    catsEl.querySelectorAll(".tut-cat").forEach((b) => b.addEventListener("click", () => { tutC = Number(b.dataset.cat); tutS = 0; renderTut(); }));
+  }
+  const body = $("tut-body");
+  if (body) {
+    if (step.uc) { body.innerHTML = `<h3>${step.title || "Screenshot needed"}</h3>${ucHtml(step.uc)}`; tryLoadShot(step.uc); }
+    else body.innerHTML = `<h3>${step.title || ""}</h3>${step.body || ""}`;
+    body.scrollTop = 0;
+  }
+  if ($("tut-title")) $("tut-title").textContent = cat.cat;
+  if ($("tut-progress")) $("tut-progress").textContent = `${tutS + 1} / ${tutSteps().length}`;
+  clearTutHighlight();
+  $("tut-arrow")?.classList.add("hidden");
+  if (step.guide) { tutOverlay()?.classList.add("peek"); setTimeout(() => guideTo(step.guide), 20); }
+  else tutOverlay()?.classList.remove("peek");
+}
+function tutNext() {
+  if (tutS < tutSteps().length - 1) tutS++;
+  else if (tutC < TUTORIAL.length - 1) { tutC++; tutS = 0; }
+  renderTut();
+}
+function tutPrev() {
+  if (tutS > 0) tutS--;
+  else if (tutC > 0) { tutC--; tutS = TUTORIAL[tutC].steps.length - 1; }
+  renderTut();
+}
+function ucHtml(uc) {
+  return `<div class="tut-uc" id="tut-uc-box">
+    <div class="tut-uc-t">⛏ UNDER CONSTRUCTION</div>
+    <div>A screenshot goes here. Upload a <b>PNG</b> or <b>JPEG</b> to:</div>
+    <div style="margin:8px 0"><code>${uc.path}</code></div>
+    <div>named <code>${uc.name}</code>, then reopen the tutorial.</div>
+  </div>`;
+}
+function tryLoadShot(uc) {
+  const img = new Image();
+  img.onload = () => { const box = $("tut-uc-box"); if (box) box.outerHTML = `<img class="tut-shot" src="${uc.path}" alt="${uc.name}">`; };
+  img.src = `${uc.path}?t=${Date.now()}`;
+}
+function guideTo(guide) {
+  if (guide.tab) document.querySelector(`nav.tabs button[data-tab="${guide.tab}"]`)?.click();
+  setTimeout(() => {
+    const el = guide.sel ? document.querySelector(guide.sel) : null;
+    if (!el) return;
+    try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (_) {}
+    el.classList.add("tut-highlight");
+    tutHl = el;
+    setTimeout(() => positionTutArrow(), 400);
+  }, guide.tab ? 280 : 20);
+}
+function positionTutArrow() {
+  if (!tutHl || !tutOverlay()?.classList.contains("peek")) return;
+  const r = tutHl.getBoundingClientRect();
+  const a = $("tut-arrow");
+  if (!a) return;
+  a.classList.remove("hidden");
+  a.style.left = `${Math.round(r.left + r.width / 2 - 12)}px`;
+  a.style.top = `${Math.round(Math.max(2, r.top - 30))}px`;
+}
+// the arrow tracks scrolling / resizing so it stays glued to its control
+window.addEventListener("scroll", () => { if (tutHl) positionTutArrow(); }, true);
+window.addEventListener("resize", () => { if (tutHl) positionTutArrow(); });
+
+$("tutorial-btn")?.addEventListener("click", openTutorial);
+$("tut-close")?.addEventListener("click", closeTutorial);
+$("tut-next")?.addEventListener("click", tutNext);
+$("tut-prev")?.addEventListener("click", tutPrev);
+
+// ---- extended help tooltips (opt-in) -----------------------------------------
+// SEPARATE from the always-on chip tooltips: this layer only fires when "Enable
+// Tutorial Popup Dialogue" is on. It reuses the existing lavender-tooltip code.
+const tutDialogueOn = () => !!$("tut-dialogue-toggle")?.checked;
+const HELP = {
+  'nav.tabs button[data-tab="pilot"]': ["PILOT", "Your mech sheet — import a COMP/CON pilot and see stats, weapons, systems and talents."],
+  'nav.tabs button[data-tab="dice"]': ["DICE", "The 3D dice tray. Queue dice, hit ROLL, read the total. All attacks roll here."],
+  'nav.tabs button[data-tab="map"]': ["MAP", "Templates, private range fields, token bond, and grid calibration."],
+  "#rolldice": ["ROLL", "Throws every queued die and pops the total."],
+  "#cleardice": ["CLEAR", "Empties the tray and clears the last result."],
+  "#addadv": ["ACCURACY", "Adds a +1 Accuracy die. Accuracy and Difficulty cancel 1-for-1; only the single highest applies."],
+  "#adddis": ["DIFFICULTY", "Adds a +1 Difficulty die (a penalty). Cancels Accuracy 1-for-1."],
+  "#btn-bond": ["BOND TOKEN", "Links the selected token to your mech so ranges follow it — and fits the grid to the scene."],
+  "#vis-toggle": ["TEMPLATE VISIBILITY", "Toggle whether weapon templates you place are seen by ALL players or just you."],
+  "#tplcolor-toggle": ["TEMPLATE COLOR", "Opens the colour picker used by Blast, Cone, Line, Paint and Pen."],
+  "#grid-mode": ["GRID TYPE", "AUTO reads the room's grid. Override to pointy/flat hex or square if a scene is unusual."],
+};
+(function setupHelpTooltips() {
+  const wire = (el, title, help) => {
+    if (!el || !help) return;
+    el.addEventListener("mouseenter", (e) => { if (tutDialogueOn()) showTip(title, help, e); });
+    el.addEventListener("mousemove", (e) => { if (tutDialogueOn() && tipEl.style.display === "block") moveTooltip(e); });
+    el.addEventListener("mouseleave", () => hideTooltip());
+  };
+  // 1) explicit HELP map (stable selectors)
+  for (const [sel, [title, help]] of Object.entries(HELP)) wire(document.querySelector(sel), title, help);
+  // 2) any element carrying a data-help attribute (e.g. the House Rules toggles)
+  document.querySelectorAll("[data-help]").forEach((el) => {
+    const title = (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 42) || "Info";
+    wire(el, title, el.getAttribute("data-help"));
+  });
+})();
+
 async function start() {
   obrReady = true;
   $("conn-dot")?.classList.add("on");
@@ -3150,6 +3325,7 @@ async function start() {
   if (st.tokenBars) { tokenBarsOn = true; if ($("tokenbars-toggle")) $("tokenbars-toggle").checked = true; }
   setOverchargeEnabled(!!st.overcharge); // off unless the player turned it on
   if ($("remoteroll-toggle") && st.hideRemoteRolls) $("remoteroll-toggle").checked = true;
+  if ($("tut-dialogue-toggle") && st.tutDialogue) $("tut-dialogue-toggle").checked = true;
   if (st.bond && st.bond.id) bond = st.bond;
   updateBondUI();
   if (st.live) restoreLive = st.live;

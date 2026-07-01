@@ -24,6 +24,8 @@
     .cm-btn[data-act="move"]:hover { border-color: var(--good); }
     .cm-btn[data-act="boost"]:hover { border-color: var(--good); }
     .cm-btn[data-act="sensors"]:hover { border-color: var(--tech); }
+    .cm-wide { width: 100%; margin-top: 6px; letter-spacing: 2px; }
+    .cm-wide:hover { border-color: var(--good); }
   </style>
 </head>
 <body>
@@ -33,6 +35,7 @@
       <button class="cm-btn" data-act="boost">BOOST</button>
       <button class="cm-btn" data-act="sensors">SENSORS</button>
     </div>
+    <button class="cm-btn cm-wide" data-act="movelancer" title="Boost range + click-to-move">MOVE LANCER</button>
   </div>
   <script type="module" src="./context-menu.js"></script>
 </body>
