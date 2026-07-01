@@ -450,39 +450,54 @@
       .gm-empty { color: var(--muted); font-family: var(--mono); font-size: 11px; padding: 20px; text-align: center; border: 1px dashed var(--line); }
 
       /* ---------- TUTORIAL ---------- */
-      #tutorial-overlay { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; background: rgba(4,6,10,0.72); }
+      #tutorial-overlay { position: fixed; inset: 0; z-index: 90; background: rgba(4,6,10,0.66); }
       #tutorial-overlay.hidden { display: none; }
-      /* "peek": dim removed, card parks at the bottom, clicks pass THROUGH to the
-         panel so the player can act on the highlighted control */
-      #tutorial-overlay.peek { background: transparent; align-items: flex-end; justify-content: center; pointer-events: none; }
-      #tut-card { pointer-events: auto; width: min(340px, 92%); max-height: 82vh; display: flex; flex-direction: column;
-        background: linear-gradient(180deg, #141926, #0c0f16); border: 1px solid var(--line); border-radius: 12px;
-        box-shadow: 0 12px 40px rgba(0,0,0,0.7); overflow: hidden; }
-      #tutorial-overlay.peek #tut-card { max-height: 40vh; margin-bottom: 10px; box-shadow: 0 -6px 30px rgba(0,0,0,0.8); }
-      #tut-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); background: rgba(47,107,189,0.14); }
-      #tut-badge { font-family: var(--mono); font-size: 8px; letter-spacing: 1px; color: var(--tech); border: 1px solid var(--tech); border-radius: 3px; padding: 2px 4px; }
+      /* "peek": backdrop clears + clicks pass THROUGH to the panel; the card stays
+         wherever the player dragged it, tethered to its target by the holo line */
+      #tutorial-overlay.peek { background: transparent; pointer-events: none; }
+      #tut-card { pointer-events: auto; position: fixed; left: 50%; top: 12%; width: 320px; height: auto; max-height: 82vh;
+        display: flex; flex-direction: column; background: linear-gradient(180deg, #141926, #0c0f16);
+        border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,0.7); overflow: hidden; }
+      #tut-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); background: rgba(47,107,189,0.14); cursor: grab; user-select: none; }
+      #tut-head.grabbing { cursor: grabbing; }
+      #tut-badge { display: flex; }
+      #tut-badge img { width: 18px; height: 18px; display: block; }
       #tut-title { font-weight: 700; letter-spacing: 1px; }
-      #tut-close { margin-left: auto; background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer; line-height: 1; }
-      #tut-close:hover { color: var(--text); }
+      #tut-menu, #tut-close { background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer; line-height: 1; padding: 0 2px; }
+      #tut-menu { margin-left: auto; }
+      #tut-menu:hover, #tut-close:hover { color: var(--text); }
       #tut-cats { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+      #tut-cats:empty { display: none; }
       .tut-cat { font-family: var(--mono); font-size: 9px; letter-spacing: 0.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 3px 8px; cursor: pointer; background: none; }
       .tut-cat.sel { color: var(--text); border-color: var(--tech); background: rgba(63,167,214,0.14); }
       .tut-cat:hover { color: var(--text); }
-      #tut-body { padding: 12px 14px; overflow-y: auto; line-height: 1.55; font-size: 13px; flex: 1 1 auto; }
+      #tut-body { padding: 12px 14px; overflow-y: auto; line-height: 1.55; font-size: 13px; flex: 1 1 auto; min-height: 60px; }
       #tut-body h3 { margin: 0 0 10px; font-size: 15px; letter-spacing: 0.4px; color: #eaf2ff; }
       #tut-body p { margin: 0 0 10px; color: #cdd7e6; }
       #tut-body b { color: #eaf2ff; }
+      /* start menu */
+      .tut-menu-btn { display: block; width: 100%; text-align: left; margin: 0 0 6px; padding: 9px 11px; background: rgba(255,255,255,0.04);
+        border: 1px solid var(--line); border-radius: 6px; color: var(--text); font-family: var(--font); font-size: 12px; letter-spacing: 0.5px; cursor: pointer; }
+      .tut-menu-btn:hover { border-color: var(--tech); background: rgba(63,167,214,0.12); }
+      .tut-menu-btn.full { border-color: var(--tech); background: rgba(63,167,214,0.16); font-weight: 700; letter-spacing: 1px; }
       #tut-foot { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--line); }
       #tut-progress { margin: 0 auto; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+      #tut-resize { position: absolute; right: 2px; bottom: 2px; width: 16px; height: 16px; cursor: nwse-resize;
+        background: linear-gradient(135deg, transparent 45%, var(--tech) 45%, var(--tech) 55%, transparent 55%, transparent 70%, var(--tech) 70%, var(--tech) 80%, transparent 80%);
+        opacity: 0.55; }
+      #tut-resize:hover { opacity: 1; }
       .tut-uc { border: 1px dashed #5b6b82; border-radius: 8px; padding: 16px 14px; text-align: center; color: var(--muted); background: rgba(255,255,255,0.02); }
       .tut-uc-t { color: var(--gold); font-family: var(--mono); font-size: 10px; letter-spacing: 1px; margin-bottom: 10px; }
       .tut-uc code { color: var(--text); background: rgba(0,0,0,0.45); padding: 2px 6px; border-radius: 3px; font-size: 11px; word-break: break-all; }
       .tut-shot { width: 100%; border-radius: 8px; border: 1px solid var(--line); display: block; }
-      #tut-arrow { position: fixed; z-index: 95; font-size: 26px; color: var(--tech); text-shadow: 0 0 8px rgba(63,167,214,0.95);
-        pointer-events: none; transition: left 0.35s cubic-bezier(0.4,0,0.2,1), top 0.35s cubic-bezier(0.4,0,0.2,1);
-        animation: tut-bob 0.9s ease-in-out infinite alternate; }
-      #tut-arrow.hidden { display: none; }
-      @keyframes tut-bob { from { transform: translateY(-3px); } to { transform: translateY(3px); } }
+      /* holographic tether: a thin marching-ants line from the card to the target */
+      #tut-link { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; z-index: 93; pointer-events: none; overflow: visible; }
+      #tut-link.hidden { display: none; }
+      #tut-link-line { stroke: var(--tech); stroke-width: 1.6; stroke-dasharray: 5 5; stroke-linecap: round;
+        filter: drop-shadow(0 0 3px rgba(63,167,214,0.9)); animation: tut-march 0.6s linear infinite; }
+      #tut-link-dot { fill: var(--tech); filter: drop-shadow(0 0 4px rgba(63,167,214,0.95)); animation: tut-pulse 1s ease-in-out infinite alternate; }
+      @keyframes tut-march { to { stroke-dashoffset: -20; } }
+      @keyframes tut-pulse { from { r: 3; opacity: 0.7; } to { r: 5; opacity: 1; } }
       .tut-highlight { animation: tut-hl 1s ease-in-out infinite alternate; border-radius: 6px; position: relative; z-index: 92; }
       @keyframes tut-hl {
         from { box-shadow: 0 0 0 2px rgba(63,167,214,0.5), 0 0 8px rgba(63,167,214,0.4); }
@@ -814,11 +829,16 @@
 
     <!-- TUTORIAL overlay (categorised slides + a guidance arrow that points at
          the real controls). Content is data-driven in main.js. -->
+    <svg id="tut-link" class="hidden" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <line id="tut-link-line" x1="0" y1="0" x2="0" y2="0" />
+      <circle id="tut-link-dot" cx="0" cy="0" r="4" />
+    </svg>
     <div id="tutorial-overlay" class="hidden" aria-hidden="true">
       <div id="tut-card">
         <div id="tut-head">
-          <span id="tut-badge">LU</span>
+          <span id="tut-badge"><img src="icons/tool.svg" alt="Lancer Uplink" /></span>
           <span id="tut-title">Tutorial</span>
+          <button id="tut-menu" title="Back to the menu">☰</button>
           <button id="tut-close" title="Close tutorial">✕</button>
         </div>
         <div id="tut-cats"></div>
@@ -828,9 +848,9 @@
           <span id="tut-progress"></span>
           <button id="tut-next" class="btn blue small">Next ›</button>
         </div>
+        <div id="tut-resize" title="Drag to resize"></div>
       </div>
     </div>
-    <div id="tut-arrow" class="hidden" aria-hidden="true">▼</div>
 
     <!-- MANTICORE: Eye of Horus flash -->
     <div id="godhead-eye" aria-hidden="true">

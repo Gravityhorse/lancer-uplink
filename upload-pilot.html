@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Upload Pilot</title>
+  <style>
+    :root { --line: rgba(255,255,255,0.14); --muted: #9aa6b8; --text: #eaf2ff; --tech: #3da5ff;
+      --mono: "IBM Plex Mono", ui-monospace, monospace; --font: "Eurostile", "Bahnschrift", "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: transparent; color: var(--text); font-family: var(--font); overflow: hidden; }
+    #up { padding: 8px 10px; }
+    .up-btn { display: block; width: 100%; text-align: center; padding: 9px 8px; border: 1px solid var(--tech);
+      border-radius: 6px; background: rgba(63,167,214,0.14); color: var(--text); font-size: 11px; letter-spacing: 1px;
+      cursor: pointer; transition: background 0.12s; }
+    .up-btn:hover { background: rgba(63,167,214,0.28); }
+    .up-status { margin-top: 7px; font-family: var(--mono); font-size: 9px; color: var(--muted); min-height: 11px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div id="up">
+    <label class="up-btn">CHOOSE COMP/CON JSON<input id="up-file" type="file" accept=".json,application/json" hidden /></label>
+    <div id="up-status" class="up-status">Pick your exported pilot file.</div>
+  </div>
+  <script type="module" src="./upload-pilot.js"></script>
+</body>
+</html>

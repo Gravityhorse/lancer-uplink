@@ -12,7 +12,7 @@
 //
 // Lancer rules note: GRIT applies to attack rolls only, never to damage.
 
-import { OBR, CH_ROLL3D, CH_STATUS, META, buildShape, buildLabel, buildPath, Command, CH_RP, CH_RP_READY, CH_RP_CLOSED, RP_POPOVER, RP_POPOVER_URL, CM_ID, CM_URL, CH_CM, CH_CM_READY, CH_CM_DATA } from "./sdk.js";
+import { OBR, CH_ROLL3D, CH_STATUS, META, buildShape, buildLabel, buildPath, Command, CH_RP, CH_RP_READY, CH_RP_CLOSED, RP_POPOVER, RP_POPOVER_URL, CM_ID, CM_URL, CH_CM, CH_CM_READY, CH_CM_DATA, CH_UPLOAD, UPLOAD_URL } from "./sdk.js";
 import * as hex from "./hex.js";
 import * as tool from "./tool.js";
 import {
@@ -1042,14 +1042,38 @@ $("btn-unbond")?.addEventListener("click", async () => {
 async function refreshContextMenu() {
   if (!obrReady) return;
   try { await OBR.contextMenu.remove(CM_ID); } catch (_) {}
+  try { await OBR.contextMenu.remove(`${CM_ID}-movelancer`); } catch (_) {}
   if (!bond || !bond.id) return;
+  const onBond = { some: [{ key: "id", value: bond.id }] };
   try {
     await OBR.contextMenu.create({
       id: CM_ID,
-      icons: [{ icon: "/lancer-uplink/icons/tool.svg", label: "Lancer Uplink", filter: { some: [{ key: "id", value: bond.id }] } }],
-      embed: { url: CM_URL, height: 92 }, // Move/Boost/Sensors + Move Lancer
+      icons: [{ icon: "/lancer-uplink/icons/tool.svg", label: "Lancer Uplink", filter: onBond }],
+      embed: { url: CM_URL, height: 52 }, // just the Move/Boost/Sensors row
+    });
+    // "Move Lancer" is a plain click item (not in the embed) so clicking it CLOSES
+    // the native menu, and it runs straight here in the panel context.
+    await OBR.contextMenu.create({
+      id: `${CM_ID}-movelancer`,
+      icons: [{ icon: "/lancer-uplink/icons/moveto.svg", label: "Move Lancer", filter: onBond }],
+      onClick: () => doMoveLancer(),
     });
   } catch (e) { console.warn("[LANCER//UPLINK] context menu failed", e); }
+}
+async function doMoveLancer() {
+  if (!currentMech) { setStatus("Load a pilot first.", "status-err"); return; }
+  // ensure the boost field is up (even if boost was already active), then arm the
+  // Move To tool so any in-range tile is click-to-move
+  if (!activeFields.boost) {
+    if (activeFields.move) await removeField("move");
+    moveState = 2;
+    await toggleField("boost", currentMech.stats.speed, true);
+    markMobilityActive();
+  } else {
+    updateMoveContext();
+  }
+  try { await tool.activateMoveTo(); } catch (e) { console.warn("[LANCER//UPLINK] Move To activate failed", e); }
+  setStatus("MOVE LANCER — boost range up. Click any tile in range to move.", "status-ok");
 }
 async function cmMove() {
   if (activeFields.boost) await removeField("boost");
@@ -1069,20 +1093,6 @@ async function handleCM(d) {
   if (d.action === "move") await cmMove();
   else if (d.action === "boost") await cmBoost();
   else if (d.action === "sensors") await toggleSensors();
-  else if (d.action === "movelancer") {
-    // ensure the boost field is up (even if boost was already active), then arm
-    // the Move To tool so any in-range tile is click-to-move
-    if (!activeFields.boost) {
-      if (activeFields.move) await removeField("move");
-      moveState = 2;
-      await toggleField("boost", currentMech.stats.speed, true);
-      markMobilityActive();
-    } else {
-      updateMoveContext();
-    }
-    try { await tool.activateMode("moveto"); } catch (_) {}
-    setStatus("MOVE LANCER — boost range up. Click any tile in range to move.", "status-ok");
-  }
 }
 
 // Created ONCE: "Bond Token" on any token, and "Move Here" on the Move To marker.
@@ -1116,6 +1126,15 @@ async function setupStaticContextMenus() {
       },
     });
   } catch (e) { console.warn("[LANCER//UPLINK] move-here context menu failed", e); }
+  try {
+    // "Upload Pilot" — an embed with a file button (a plain onClick can't open a
+    // file dialog reliably; the embed gives us the required user gesture).
+    await OBR.contextMenu.create({
+      id: `${CM_ID}-upload`,
+      icons: [{ icon: "/lancer-uplink/icons/tool.svg", label: "Upload Pilot", filter: { max: 1, every: [{ key: "layer", value: "CHARACTER" }] } }],
+      embed: { url: UPLOAD_URL, height: 78 },
+    });
+  } catch (e) { console.warn("[LANCER//UPLINK] upload context menu failed", e); }
 }
 
 const fieldColor = (kind) =>
@@ -3007,65 +3026,100 @@ async function recalibrate() {
 }
 
 // ============================================================ TUTORIAL ========
-// A categorised, data-driven walkthrough. Each step is either prose, an "under
-// construction" screenshot placeholder, or a GUIDE (switch to the right tab,
-// scroll the real control into view, pulse-highlight it, and float an arrow at
-// it — the arrow tracks scrolling). ELI5 language throughout. Content is easy to
-// extend: just add steps/categories to TUTORIAL.
+// A categorised, data-driven walkthrough. Open it → pick the FULL tour or a
+// single segment. Steps are prose, an "under construction" screenshot slot, or a
+// GUIDE that switches to the right tab, scrolls the real control into view,
+// pulse-highlights it, and draws a holographic tether line from the (draggable,
+// resizable) card to that control. ELI5 throughout. To cover new features later,
+// just add steps/categories here.
 const TUTORIAL = [
-  { cat: "Start", steps: [
-    { title: "Welcome, Lancer", body: "<p>This panel is your mech's cockpit inside Owlbear Rodeo. It has three tabs: <b>PILOT</b> (your sheet), <b>DICE</b> (rolling), and <b>MAP</b> (movement &amp; templates).</p><p>Use <b>Next</b> to page through, or tap a category above to jump around. Hit <b>✕</b> any time to close.</p>" },
-    { title: "The three tabs", body: "<p>These are the tabs. The glowing one is where you'll spend most of your time. Click <b>PILOT</b> to load your mech.</p>", guide: { sel: 'nav.tabs button[data-tab="pilot"]' } },
+  { cat: "Start", blurb: "the basics", steps: [
+    { title: "Welcome, Pilot", body: "<p>This panel is your Mech's cockpit inside Owlbear Rodeo. Your Chassis HUD has three tabs: <b>PILOT</b> (your character), <b>DICE</b> (your rolls), and <b>MAP</b> (your movement &amp; on-screen display).</p><p>Use <b>Next</b> to page through, tap a category chip to jump, or ☰ to come back to this menu. You can drag this window by its title bar and resize it from the bottom-right corner.</p>" },
+    { title: "The three tabs", body: "<p>These are your tabs. The glowing one is where you'll spend most of your time. Click <b>PILOT</b> to load your mech.</p>", guide: { sel: 'nav.tabs button[data-tab="pilot"]' } },
   ]},
-  { cat: "Pilot", steps: [
-    { title: "Import your pilot", body: "<p>In <b>COMP/CON</b>, export your pilot (<i>Pilot Roster → Export → Download pilot as JSON</i>). Then open the <b>IMPORT</b> section here and pick that file.</p>", guide: { tab: "pilot", sel: "#sec-import" } },
+  { cat: "Pilot", blurb: "import & sheet", steps: [
+    { title: "Import your pilot", body: "<p>In <b>COMP/CON</b>, export your pilot (<i>Pilot Roster → Export → Download pilot as JSON</i>). Open the <b>IMPORT</b> section here and pick that file — or right-click any token and choose <b>Upload Pilot</b>.</p>", guide: { tab: "pilot", sel: "#sec-import" } },
     { title: "Read your sheet", uc: { path: "tutorial/img/pilot-sheet.png", name: "pilot-sheet.png" } },
     { title: "Switch mechs / go on foot", body: "<p>If your pilot has more than one mech — or you want to fight on foot — use the <b>Active Mech</b> dropdown at the top of the sheet.</p>" },
   ]},
-  { cat: "Dice", steps: [
+  { cat: "Dice", blurb: "rolling & attacks", steps: [
     { title: "Roll some dice", body: "<p>The <b>DICE</b> tab is a real 3D tray. Tap dice to queue them, then hit <b>ROLL</b>. Accuracy (+) and Difficulty (−) cancel out and only the highest one counts — the Lancer way.</p>", guide: { tab: "dice", sel: "#rolldice" } },
-    { title: "Attacks from the sheet", body: "<p>Every weapon on your sheet has <b>ATK</b> (to-hit), <b>DMG</b> (damage), a target-lock ⬢, and a template ◈. They all roll through the same tray so the table can watch.</p>" },
+    { title: "Attacks from the sheet", body: "<p>Every weapon on your sheet has <b>ATK</b> (to-hit), <b>DMG</b> (damage), a target-lock ⬢, and a template ◈. They all roll through the same tray so the whole table can watch.</p>" },
     { title: "Overkill &amp; crits", uc: { path: "tutorial/img/overkill.png", name: "overkill.png" } },
   ]},
-  { cat: "Map", steps: [
+  { cat: "Map", blurb: "move & templates", steps: [
     { title: "Bond your token", body: "<p>Select your mech's token on the map, then hit <b>BOND SELECTED TOKEN</b> (or right-click the token → <b>Bond Token</b>). Now Move/Sensor ranges snap to it and the grid fits itself to the scene.</p>", guide: { tab: "map", sel: "#btn-bond" } },
     { title: "Move &amp; Sensors", body: "<p><b>MOVE</b> shows your speed in green (tap again for Boost = double). <b>SENSORS</b> shows your scan range in blue. Only you see these.</p>" },
     { title: "Templates &amp; colour", body: "<p>Pick the <b>LANCER</b> tool in Owlbear's left toolbar to drop Blast / Cone / Line templates, Paint difficult terrain, or free-draw with the Pen. <b>TEMPLATE COLOR</b> sets the colour for all of them.</p>", guide: { tab: "map", sel: "#tplcolor-toggle" } },
   ]},
-  { cat: "Tokens", steps: [
+  { cat: "Tokens", blurb: "bars & right-click", steps: [
     { title: "Live HP / Heat bars", body: "<p>Turn on <b>LIVE HP / HEAT BARS</b> in House Rules to float little blue HP and orange Heat bars over every bonded token, so the whole table can read health at a glance.</p>", guide: { tab: "map", sel: "#tokenbars-toggle" } },
-    { title: "Right-click your token", body: "<p>Right-click your bonded token for a mini <b>Lancer Uplink</b> menu: <b>Move</b>, <b>Boost</b>, <b>Sensors</b>, and <b>Move Lancer</b> (boost range + click-to-move). Fast access without opening the whole panel.</p>" },
+    { title: "Right-click your token", body: "<p>Right-click your bonded token for a mini <b>Lancer Uplink</b> menu: <b>Move</b>, <b>Boost</b>, and <b>Sensors</b> pop out on hover. <b>Move Lancer</b> turns on boost range and lets you click any tile in reach to move. Fast access without opening the whole panel.</p>" },
   ]},
-  { cat: "Overcharge", steps: [
-    { title: "Turn it on", body: "<p>Overcharge is optional. Flip <b>OVERCHARGE DICE</b> in House Rules to reveal the orange OC button by the dice, and a 0–4 level meter.</p>", guide: { tab: "dice", sel: "#overcharge-toggle" } },
+  { cat: "Overcharge", blurb: "push the reactor", steps: [
+    { title: "Turn it on", body: "<p>Overcharge is optional. Flip <b>OVERCHARGE DICE</b> in House Rules to reveal the orange OC button by the dice and a 0–4 level meter.</p>", guide: { tab: "dice", sel: "#overcharge-toggle" } },
     { title: "How it works", body: "<p>Each Overcharge costs escalating Heat: <b>1 → 1d3 → 1d6 → 1d6+4</b>. The first is instant; the rest prime a molten die you fire with ROLL. The reactor deck glows red while it's hot. <b>CLEAR OC</b> resets it after a full rest.</p>" },
   ]},
-  { cat: "GM", steps: [
-    { title: "Mission Control", uc: { path: "tutorial/img/mission-control.png", name: "mission-control.png" } },
-    { title: "That's the tour", body: "<p>That's the essentials! Flip on <b>Enable Tutorial Popup Dialogue</b> in House Rules and hover anything to get a plain-English explanation as you go. Have fun out there, Lancer.</p>" },
+  { cat: "GM", blurb: "Mission Control", steps: [
+    { title: "See this logo?", body: "<p>Up in the corner beside the <b>LANCER UPLINK</b> title is the hex logo (top-left). <b>Click it</b> to flip the panel over to <b>MISSION CONTROL</b> — the GM side — and click again to flip back. It spins a neat 180° as it swaps.</p>", guide: { sel: "#hdr-icon" } },
+    { title: "What is Mission Control?", body: "<p>Mission Control is the GM's dashboard. <b>Live Squad Telemetry</b> shows every player's HP/Heat in real time. <b>Field Telemetry</b> is your private NPC roster — add enemies, track their stats, and click a card to ping and fly the camera to their token.</p>" },
+    { title: "A look inside", uc: { path: "tutorial/img/mission-control.png", name: "mission-control.png" } },
+    { title: "Join us on the Frontier", body: "<p>That's the essentials! You may access <b>Enable Tutorial Popup Dialogue</b> at any time under House Rules, and hover anything to get an explanation as you go. Good luck out there Lancer, and happy hunting.</p>" },
   ]},
 ];
 
+let tutMode = null; // null = start menu; "full"; or a segment (category) index
 let tutC = 0, tutS = 0, tutHl = null;
 const tutOverlay = () => $("tutorial-overlay");
 const tutSteps = () => (TUTORIAL[tutC]?.steps || []);
 
-function openTutorial() { tutC = 0; tutS = 0; renderTut(); tutOverlay()?.classList.remove("hidden"); }
+function openTutorial() { tutOverlay()?.classList.remove("hidden"); centerTutCard(); renderMenu(); }
 function closeTutorial() {
   tutOverlay()?.classList.add("hidden");
   tutOverlay()?.classList.remove("peek");
   clearTutHighlight();
-  $("tut-arrow")?.classList.add("hidden");
 }
-function clearTutHighlight() { if (tutHl) { tutHl.classList.remove("tut-highlight"); tutHl = null; } }
+function centerTutCard() {
+  const card = $("tut-card"); if (!card) return;
+  const w = card.offsetWidth || 320;
+  card.style.left = `${Math.max(6, Math.round((window.innerWidth - w) / 2))}px`;
+  card.style.top = `${Math.round(window.innerHeight * 0.1)}px`;
+}
+function clearTutHighlight() { if (tutHl) { tutHl.classList.remove("tut-highlight"); tutHl = null; } stopTether(); }
 
-function renderTut() {
-  const cat = TUTORIAL[tutC]; if (!cat) return;
-  const step = cat.steps[tutS]; if (!step) return;
+function renderMenu() {
+  tutMode = null;
+  tutOverlay()?.classList.remove("peek");
+  clearTutHighlight();
+  if ($("tut-cats")) $("tut-cats").innerHTML = "";
+  if ($("tut-title")) $("tut-title").textContent = "Tutorial";
+  if ($("tut-progress")) $("tut-progress").textContent = "";
+  $("tut-prev")?.setAttribute("disabled", "true");
+  $("tut-next")?.setAttribute("disabled", "true");
+  const body = $("tut-body");
+  if (!body) return;
+  body.innerHTML = `<h3>Choose your path</h3><p>New here? Take the <b>full tour</b>. Or jump to just the part you need.</p>` +
+    `<button class="tut-menu-btn full" data-seg="full">▶ FULL TUTORIAL</button>` +
+    TUTORIAL.map((c, i) => `<button class="tut-menu-btn" data-seg="${i}"><b>${c.cat}</b> — ${c.blurb || ""}</button>`).join("");
+  body.querySelectorAll(".tut-menu-btn").forEach((b) => b.addEventListener("click", () => {
+    const s = b.dataset.seg;
+    if (s === "full") { tutMode = "full"; tutC = 0; } else { tutMode = Number(s); tutC = Number(s); }
+    tutS = 0; renderStep();
+  }));
+  body.scrollTop = 0;
+}
+
+function renderStep() {
+  const cat = TUTORIAL[tutC]; if (!cat) return renderMenu();
+  const step = cat.steps[tutS]; if (!step) return renderMenu();
+  $("tut-prev")?.removeAttribute("disabled");
+  $("tut-next")?.removeAttribute("disabled");
   const catsEl = $("tut-cats");
   if (catsEl) {
     catsEl.innerHTML = TUTORIAL.map((c, i) => `<button class="tut-cat ${i === tutC ? "sel" : ""}" data-cat="${i}">${c.cat}</button>`).join("");
-    catsEl.querySelectorAll(".tut-cat").forEach((b) => b.addEventListener("click", () => { tutC = Number(b.dataset.cat); tutS = 0; renderTut(); }));
+    catsEl.querySelectorAll(".tut-cat").forEach((b) => b.addEventListener("click", () => {
+      tutC = Number(b.dataset.cat); tutS = 0; if (tutMode !== "full") tutMode = tutC; renderStep();
+    }));
   }
   const body = $("tut-body");
   if (body) {
@@ -3076,19 +3130,20 @@ function renderTut() {
   if ($("tut-title")) $("tut-title").textContent = cat.cat;
   if ($("tut-progress")) $("tut-progress").textContent = `${tutS + 1} / ${tutSteps().length}`;
   clearTutHighlight();
-  $("tut-arrow")?.classList.add("hidden");
   if (step.guide) { tutOverlay()?.classList.add("peek"); setTimeout(() => guideTo(step.guide), 20); }
   else tutOverlay()?.classList.remove("peek");
 }
 function tutNext() {
-  if (tutS < tutSteps().length - 1) tutS++;
-  else if (tutC < TUTORIAL.length - 1) { tutC++; tutS = 0; }
-  renderTut();
+  if (tutMode == null) return;
+  if (tutS < tutSteps().length - 1) { tutS++; return renderStep(); }
+  if (tutMode === "full" && tutC < TUTORIAL.length - 1) { tutC++; tutS = 0; return renderStep(); }
+  renderMenu();
 }
 function tutPrev() {
-  if (tutS > 0) tutS--;
-  else if (tutC > 0) { tutC--; tutS = TUTORIAL[tutC].steps.length - 1; }
-  renderTut();
+  if (tutMode == null) return;
+  if (tutS > 0) { tutS--; return renderStep(); }
+  if (tutMode === "full" && tutC > 0) { tutC--; tutS = TUTORIAL[tutC].steps.length - 1; return renderStep(); }
+  renderMenu();
 }
 function ucHtml(uc) {
   return `<div class="tut-uc" id="tut-uc-box">
@@ -3111,24 +3166,68 @@ function guideTo(guide) {
     try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (_) {}
     el.classList.add("tut-highlight");
     tutHl = el;
-    setTimeout(() => positionTutArrow(), 400);
+    setTimeout(startTether, 350);
   }, guide.tab ? 280 : 20);
 }
-function positionTutArrow() {
-  if (!tutHl || !tutOverlay()?.classList.contains("peek")) return;
-  const r = tutHl.getBoundingClientRect();
-  const a = $("tut-arrow");
-  if (!a) return;
-  a.classList.remove("hidden");
-  a.style.left = `${Math.round(r.left + r.width / 2 - 12)}px`;
-  a.style.top = `${Math.round(Math.max(2, r.top - 30))}px`;
+
+// ---- holographic tether: a marching-ants line from the card to the target ----
+let tetherRaf = 0;
+function startTether() {
+  cancelAnimationFrame(tetherRaf);
+  const loop = () => { if (!tutHl) { stopTether(); return; } updateTether(); tetherRaf = requestAnimationFrame(loop); };
+  tetherRaf = requestAnimationFrame(loop);
 }
-// the arrow tracks scrolling / resizing so it stays glued to its control
-window.addEventListener("scroll", () => { if (tutHl) positionTutArrow(); }, true);
-window.addEventListener("resize", () => { if (tutHl) positionTutArrow(); });
+function stopTether() { cancelAnimationFrame(tetherRaf); $("tut-link")?.classList.add("hidden"); }
+function updateTether() {
+  const link = $("tut-link"), line = $("tut-link-line"), dot = $("tut-link-dot"), card = $("tut-card");
+  if (!tutHl || !link || !line || !card) return;
+  const t = tutHl.getBoundingClientRect();
+  const c = card.getBoundingClientRect();
+  const tx = t.left + t.width / 2, ty = t.top + t.height / 2;
+  // start = the point on the card's border nearest the target, so the line
+  // emanates from the edge of the popup and points straight at the control
+  const sx = Math.max(c.left, Math.min(tx, c.right));
+  const sy = Math.max(c.top, Math.min(ty, c.bottom));
+  line.setAttribute("x1", sx); line.setAttribute("y1", sy);
+  line.setAttribute("x2", tx); line.setAttribute("y2", ty);
+  dot.setAttribute("cx", tx); dot.setAttribute("cy", ty);
+  link.classList.remove("hidden");
+}
+
+// ---- drag (title bar) + resize (corner grip) ---------------------------------
+(function setupTutDragResize() {
+  const card = $("tut-card"), head = $("tut-head"), rez = $("tut-resize");
+  if (!card || !head) return;
+  let dragging = false, resizing = false, sx = 0, sy = 0, ox = 0, oy = 0, ow = 0, oh = 0;
+  head.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("#tut-menu, #tut-close")) return;
+    dragging = true; head.classList.add("grabbing");
+    const r = card.getBoundingClientRect(); sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+    try { head.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  rez?.addEventListener("pointerdown", (e) => {
+    resizing = true; const r = card.getBoundingClientRect(); sx = e.clientX; sy = e.clientY; ow = r.width; oh = r.height;
+    try { rez.setPointerCapture(e.pointerId); } catch (_) {}
+    e.stopPropagation();
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (dragging) {
+      let nx = ox + (e.clientX - sx), ny = oy + (e.clientY - sy);
+      nx = Math.max(2, Math.min(nx, window.innerWidth - 60));
+      ny = Math.max(2, Math.min(ny, window.innerHeight - 40));
+      card.style.left = `${nx}px`; card.style.top = `${ny}px`;
+    } else if (resizing) {
+      const nw = Math.max(240, Math.min(ow + (e.clientX - sx), window.innerWidth - 12));
+      const nh = Math.max(160, Math.min(oh + (e.clientY - sy), window.innerHeight - 12));
+      card.style.width = `${nw}px`; card.style.maxHeight = "none"; card.style.height = `${nh}px`;
+    }
+  });
+  window.addEventListener("pointerup", () => { dragging = false; resizing = false; head.classList.remove("grabbing"); });
+})();
 
 $("tutorial-btn")?.addEventListener("click", openTutorial);
 $("tut-close")?.addEventListener("click", closeTutorial);
+$("tut-menu")?.addEventListener("click", renderMenu);
 $("tut-next")?.addEventListener("click", tutNext);
 $("tut-prev")?.addEventListener("click", tutPrev);
 
@@ -3279,6 +3378,16 @@ async function start() {
     OBR.broadcast.onMessage(CH_RP_CLOSED, () => { rpOpen = false; rpBuffer = []; });
     // right-click context-menu embed: Move / Boost / Sensors commands
     OBR.broadcast.onMessage(CH_CM, (ev) => handleCM(ev.data));
+    // right-click "Upload Pilot" embed → import the JSON it read
+    OBR.broadcast.onMessage(CH_UPLOAD, async (ev) => {
+      const d = ev.data || {};
+      if (!d.text) return;
+      try {
+        const json = JSON.parse(d.text);
+        await importPilots(listPilots(json), json);
+        setStatus(`Imported ${d.name || "pilot"}.`, "status-ok");
+      } catch (err) { setStatus(`Import failed: ${err.message || err}`, "status-err"); }
+    });
   } catch (e) {
     console.warn("[LANCER//UPLINK] broadcast channels unavailable", e);
   }

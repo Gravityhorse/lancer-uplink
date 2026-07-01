@@ -135,36 +135,45 @@ A categorical, in-app tutorial for new players. Proposed shape:
 
 ## Shipped in 2.8.12 ✓
 
-- ✓ **"Move Lancer" right-click button** — the fourth entry in the bonded token's
-  Lancer Uplink menu forces the Boost field up (even if Boost was already on) and
-  arms the Move To tool, so a whole turn of movement is right-click → click-a-tile
-- ✓ **Close button on the multiplayer roll popover** — an ✕ top-right so you don't
-  have to wait out the auto-close
+- ✓ **Right-click "Upload Pilot"** on any token — an embed with a file button that
+  reads your COMP/CON JSON and imports it (the file dialog opens from the embed's
+  own gesture; a bare `onClick` can't). Broadcasts the text to the panel over LOCAL
+- ✓ **"Move Lancer"** is now a top-level right-click item (not in the embed) so
+  clicking it CLOSES the native menu, forces the Boost field up and arms the Move
+  To tool via `tool.activateMoveTo()` — a whole turn is right-click → click-a-tile
+- ✓ **Close button on the multiplayer roll popover** (✕ top-right)
 - ✓ **Right-click menu de-duped** — dropped the redundant "Lancer Uplink" header
-  inside the embed (the menu row already says it); off-center grid fix (centre-only
-  snapping) from the same pass
-- ✓ **Tutorial — foundation**: a **Tutorial** button at the top of House Rules opens
-  a categorised, ELI5 walkthrough overlay (Start / Pilot / Dice / Map / Tokens /
-  Overcharge / GM). Steps can be prose, an **Under Construction** screenshot
-  placeholder (with the exact `tutorial/img/…` path + filename to upload), or a
-  **guide** that switches to the right tab, scrolls the real control into view,
-  pulse-highlights it and floats an arrow that tracks scrolling
-- ✓ **"Enable Tutorial Popup Dialogue" toggle** (off by default) — an opt-in layer
-  of lavender help pop-ups across the panel (tabs, ROLL, ACC/DIF, Bond, template
-  controls, House Rules toggles…). The existing chip tooltips stay ALWAYS on; this
-  is a separate `setupHelpTooltips()` chunk gated by the toggle. The "auto
-  structure/overheat" explanation moved out of the House Rules body into its hover
-  tip
+  inside the embed; off-center grid fix (centre-only snapping) from the same pass
+- ✓ **Tutorial** — a **Tutorial** button at the top of House Rules opens a
+  categorised, ELI5 walkthrough. It now starts on a **menu** (Full Tour or jump to
+  one segment), the card is **draggable (title bar) and resizable (corner grip)**,
+  the "LU" badge is the real logo (with a GM step that guides you to click the
+  header logo → Mission Control), and steps guide via a **holographic tether line**
+  (marching-ants) drawn from the card to the target control — it follows the card
+  as you drag and leads the eye to what the step describes (replacing the arrow,
+  which read poorly). Under Construction slots print the exact upload path/name
+- ✓ **"Enable Tutorial Popup Dialogue" toggle** (off by default) — opt-in lavender
+  help across the panel; existing chip tooltips stay ALWAYS on (separate
+  `setupHelpTooltips()` chunk). The "auto structure/overheat" text moved into its
+  hover tip
+
+### Keeping the tutorial current (process note)
+The walkthrough is data-driven in the `TUTORIAL` array in `main.js`. **When a new
+feature ships, add or edit a step there** (prose, a `guide:{tab,sel}`, or a
+`uc:{path,name}` screenshot slot) so the tutorial never drifts from the app.
 
 ### Tutorial — still to do (needs you + a later pass)
 - **Screenshots**: the Under Construction slides name exactly what to capture and
   where to drop it (`tutorial/img/pilot-sheet.png`, `overkill.png`,
   `mission-control.png`). Add them and they appear automatically. More slides can
   be turned into screenshot steps the same way.
-- **Immersive arrow choreography**: right now a guide step auto-scrolls the control
-  into view + highlights + points. The fuller "make the player scroll up, then
-  click the tab, then scroll down" step-by-step is scaffolded (arrow + highlight +
-  scroll-tracking are in place) but not yet sequenced per control.
+- **Tether polish / choreography**: the holo line + highlight + scroll-tracking are
+  in place; the fuller "make the player scroll up, then click the tab, then scroll
+  down" step-by-step sequence is scaffolded but not yet sequenced per control.
+- **Reliability caveats (untested live)**: whether a context-menu `onClick` reliably
+  fires with the panel closed (Move Lancer / Bond / Move Here / Upload all assume
+  the panel context is alive); whether `LOCAL` upload delivery + import works
+  end-to-end; whether `tool.activateMoveTo()` visibly switches the toolbar.
 - **Extend `data-help` coverage**: the opt-in tips cover a representative set; add
   more selectors to the `HELP` map / `data-help` attributes to blanket every
   control.

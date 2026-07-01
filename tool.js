@@ -550,6 +550,11 @@ export function setMoveContext(ctx) {
   if (!moveCtx) requestMoveMarker(null);
 }
 export function clearMoveMarker() { requestMoveMarker(null); }
+// Switch the toolbar to the LANCER tool + Move To mode (used by "Move Lancer").
+export async function activateMoveTo() {
+  try { await OBR.tool.activateTool(TOOL); } catch (_) {}
+  try { await OBR.tool.activateMode(MODES.moveto); } catch (_) {}
+}
 
 // The marker's shape is a single hex/cell centred at ITS OWN origin, so we can
 // slide it by updating `position` (which re-renders) instead of delete+add on

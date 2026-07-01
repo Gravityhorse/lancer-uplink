@@ -27,3 +27,5 @@ export const CM_URL = "/lancer-uplink/context-menu.html";
 export const CH_CM = `${ID}/cm`;              // embed → panel: a command {action, ...}
 export const CH_CM_READY = `${ID}/cm-ready`;  // embed → panel: "loaded, send me data"
 export const CH_CM_DATA = `${ID}/cm-data`;    // panel → embed: { name, weapons, active }
+export const CH_UPLOAD = `${ID}/upload`;      // upload embed → panel: { text, name }
+export const UPLOAD_URL = "/lancer-uplink/upload-pilot.html";
