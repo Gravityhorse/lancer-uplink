@@ -24,8 +24,11 @@
     .cm-btn[data-act="move"]:hover { border-color: var(--good); }
     .cm-btn[data-act="boost"]:hover { border-color: var(--good); }
     .cm-btn[data-act="sensors"]:hover { border-color: var(--tech); }
-    .cm-wide { width: 100%; margin-top: 6px; letter-spacing: 2px; }
+    .cm-wide { width: 100%; margin: 6px 0; letter-spacing: 2px; }
     .cm-wide:hover { border-color: var(--good); }
+    .cm-file { display: flex; align-items: center; justify-content: center; text-align: center; font-size: 10px; letter-spacing: 0.5px; cursor: pointer; }
+    .cm-file:hover { border-color: var(--tech); }
+    .cm-btn[data-act="bond"]:hover { border-color: var(--tech); }
   </style>
 </head>
 <body>
@@ -34,6 +37,11 @@
       <button class="cm-btn" data-act="move">MOVE</button>
       <button class="cm-btn" data-act="boost">BOOST</button>
       <button class="cm-btn" data-act="sensors">SENSORS</button>
+    </div>
+    <button class="cm-btn cm-wide" data-act="movelancer" title="Boost range + click-to-move">MOVE LANCER</button>
+    <div class="cm-row">
+      <button class="cm-btn" data-act="bond" title="Bond this token to your mech">BOND TOKEN</button>
+      <label class="cm-btn cm-file" title="Import a COMP/CON pilot JSON">CHOOSE COMP/CON JSON<input id="cm-upload" type="file" accept=".json,application/json" hidden /></label>
     </div>
   </div>
   <script type="module" src="./context-menu.js"></script>

@@ -1034,32 +1034,11 @@ $("btn-unbond")?.addEventListener("click", async () => {
 });
 
 // ============================================================ CONTEXT MENU ====
-// Two right-click entries:
-//  • "Bond Token" on ANY token — quick-bond it (+ fit the grid).
-//  • "Lancer Uplink" on the BONDED token — a tiny embed (like Owl Trackers) that
-//    pops Move / Boost / Sensors on hover; its buttons LOCAL-broadcast back here
-//    so they reuse the exact range-field code the panel uses.
-async function refreshContextMenu() {
-  if (!obrReady) return;
-  try { await OBR.contextMenu.remove(CM_ID); } catch (_) {}
-  try { await OBR.contextMenu.remove(`${CM_ID}-movelancer`); } catch (_) {}
-  if (!bond || !bond.id) return;
-  const onBond = { some: [{ key: "id", value: bond.id }] };
-  try {
-    await OBR.contextMenu.create({
-      id: CM_ID,
-      icons: [{ icon: "/lancer-uplink/icons/tool.svg", label: "Lancer Uplink", filter: onBond }],
-      embed: { url: CM_URL, height: 52 }, // just the Move/Boost/Sensors row
-    });
-    // "Move Lancer" is a plain click item (not in the embed) so clicking it CLOSES
-    // the native menu, and it runs straight here in the panel context.
-    await OBR.contextMenu.create({
-      id: `${CM_ID}-movelancer`,
-      icons: [{ icon: "/lancer-uplink/icons/moveto.svg", label: "Move Lancer", filter: onBond }],
-      onClick: () => doMoveLancer(),
-    });
-  } catch (e) { console.warn("[LANCER//UPLINK] context menu failed", e); }
-}
+// ONE right-click "Lancer Uplink" dropdown on any token (created once, below),
+// holding Move / Boost / Sensors, Move Lancer, Bond Token and Upload Pilot. Plus
+// a separate "Move Here" entry that only shows on the Move To marker.
+// (The bonded-only menu is gone — everything is under the one dropdown now.)
+async function refreshContextMenu() { /* menu is static now — nothing to refresh */ }
 async function doMoveLancer() {
   if (!currentMech) { setStatus("Load a pilot first.", "status-err"); return; }
   // ensure the boost field is up (even if boost was already active), then arm the
@@ -1087,32 +1066,39 @@ async function cmBoost() {
   else { moveState = 2; await toggleField("boost", currentMech.stats.speed, true); }
   markMobilityActive();
 }
+async function bondSelectedToken() {
+  try {
+    const sel = await OBR.player.getSelection();
+    if (!sel || !sel.length) { setStatus("Right-click a token first, then Bond.", "status-err"); return; }
+    const items = await OBR.scene.items.getItems([sel[0]]);
+    applyBond(sel[0], items[0]?.name || items[0]?.text?.plainText || "token");
+    try { await recalibrate(); } catch (_) {}
+    setStatus(`Bonded to "${bond.name}" — grid fitted.`, "status-ok");
+  } catch (_) { setStatus("Could not read the selection.", "status-err"); }
+}
 async function handleCM(d) {
   if (!d || !d.action) return;
+  if (d.action === "bond") return bondSelectedToken();     // no pilot needed
+  if (d.action === "movelancer") return doMoveLancer();
   if (!currentMech) { setStatus("Load a pilot first.", "status-err"); return; }
   if (d.action === "move") await cmMove();
   else if (d.action === "boost") await cmBoost();
   else if (d.action === "sensors") await toggleSensors();
 }
 
-// Created ONCE: "Bond Token" on any token, and "Move Here" on the Move To marker.
+// Created ONCE: the "Lancer Uplink" dropdown on ANY token, and "Move Here" on the
+// Move To marker.
 let staticCMDone = false;
 async function setupStaticContextMenus() {
   if (!obrReady || staticCMDone) return;
   staticCMDone = true;
   try {
     await OBR.contextMenu.create({
-      id: `${CM_ID}-bond`,
-      icons: [{ icon: "/lancer-uplink/icons/tool.svg", label: "Bond Token", filter: { max: 1, every: [{ key: "layer", value: "CHARACTER" }] } }],
-      onClick: async (context) => {
-        const it = context.items && context.items[0];
-        if (!it) return;
-        applyBond(it.id, it.name || it.text?.plainText || "token");
-        try { await recalibrate(); } catch (_) {}
-        setStatus(`Bonded to "${bond.name}" — grid fitted.`, "status-ok");
-      },
+      id: CM_ID,
+      icons: [{ icon: "/lancer-uplink/icons/tool.svg", label: "Lancer Uplink", filter: { max: 1, every: [{ key: "layer", value: "CHARACTER" }] } }],
+      embed: { url: CM_URL, height: 140 }, // Move/Boost/Sensors · Move Lancer · Bond · Upload
     });
-  } catch (e) { console.warn("[LANCER//UPLINK] bond context menu failed", e); }
+  } catch (e) { console.warn("[LANCER//UPLINK] lancer-uplink context menu failed", e); }
   try {
     await OBR.contextMenu.create({
       id: `${CM_ID}-movehere`,
@@ -1126,15 +1112,6 @@ async function setupStaticContextMenus() {
       },
     });
   } catch (e) { console.warn("[LANCER//UPLINK] move-here context menu failed", e); }
-  try {
-    // "Upload Pilot" — an embed with a file button (a plain onClick can't open a
-    // file dialog reliably; the embed gives us the required user gesture).
-    await OBR.contextMenu.create({
-      id: `${CM_ID}-upload`,
-      icons: [{ icon: "/lancer-uplink/icons/tool.svg", label: "Upload Pilot", filter: { max: 1, every: [{ key: "layer", value: "CHARACTER" }] } }],
-      embed: { url: UPLOAD_URL, height: 78 },
-    });
-  } catch (e) { console.warn("[LANCER//UPLINK] upload context menu failed", e); }
 }
 
 const fieldColor = (kind) =>
@@ -3038,7 +3015,7 @@ const TUTORIAL = [
     { title: "The three tabs", body: "<p>These are your tabs. The glowing one is where you'll spend most of your time. Click <b>PILOT</b> to load your mech.</p>", guide: { sel: 'nav.tabs button[data-tab="pilot"]' } },
   ]},
   { cat: "Pilot", blurb: "import & sheet", steps: [
-    { title: "Import your pilot", body: "<p>In <b>COMP/CON</b>, export your pilot (<i>Pilot Roster → Export → Download pilot as JSON</i>). Open the <b>IMPORT</b> section here and pick that file — or right-click any token and choose <b>Upload Pilot</b>.</p>", guide: { tab: "pilot", sel: "#sec-import" } },
+    { title: "Import your pilot", body: "<p>In <b>COMP/CON</b>, export your pilot (<i>Pilot Roster → Export → Download pilot as JSON</i>). Open the <b>IMPORT</b> section here and pick that file — or right-click any token → <b>Lancer Uplink → Choose COMP/CON JSON</b>.</p>", guide: { tab: "pilot", sel: "#sec-import" } },
     { title: "Read your sheet", uc: { path: "tutorial/img/pilot-sheet.png", name: "pilot-sheet.png" } },
     { title: "Switch mechs / go on foot", body: "<p>If your pilot has more than one mech — or you want to fight on foot — use the <b>Active Mech</b> dropdown at the top of the sheet.</p>" },
   ]},
@@ -3054,7 +3031,7 @@ const TUTORIAL = [
   ]},
   { cat: "Tokens", blurb: "bars & right-click", steps: [
     { title: "Live HP / Heat bars", body: "<p>Turn on <b>LIVE HP / HEAT BARS</b> in House Rules to float little blue HP and orange Heat bars over every bonded token, so the whole table can read health at a glance.</p>", guide: { tab: "map", sel: "#tokenbars-toggle" } },
-    { title: "Right-click your token", body: "<p>Right-click your bonded token for a mini <b>Lancer Uplink</b> menu: <b>Move</b>, <b>Boost</b>, and <b>Sensors</b> pop out on hover. <b>Move Lancer</b> turns on boost range and lets you click any tile in reach to move. Fast access without opening the whole panel.</p>" },
+    { title: "Right-click any token", body: "<p>Right-click a token → <b>Lancer Uplink</b> for a mini menu: <b>Move</b>, <b>Boost</b>, <b>Sensors</b>, <b>Move Lancer</b> (boost range + click-a-tile to move), <b>Bond Token</b>, and <b>Choose COMP/CON JSON</b> to import a pilot. Fast access without opening the whole panel.</p>" },
   ]},
   { cat: "Overcharge", blurb: "push the reactor", steps: [
     { title: "Turn it on", body: "<p>Overcharge is optional. Flip <b>OVERCHARGE DICE</b> in House Rules to reveal the orange OC button by the dice and a 0–4 level meter.</p>", guide: { tab: "dice", sel: "#overcharge-toggle" } },
@@ -3073,11 +3050,31 @@ let tutC = 0, tutS = 0, tutHl = null;
 const tutOverlay = () => $("tutorial-overlay");
 const tutSteps = () => (TUTORIAL[tutC]?.steps || []);
 
-function openTutorial() { tutOverlay()?.classList.remove("hidden"); centerTutCard(); renderMenu(); }
-function closeTutorial() {
+// While the tutorial is open we GROW the Owlbear action popover (its iframe hard-
+// clips its contents, so a card can't leave the 400px panel otherwise). This lets
+// the window be dragged well outside the panel while keeping the tether — then we
+// restore the panel's size on close.
+let tutPrevSize = null;
+async function openTutorial() {
+  tutOverlay()?.classList.remove("hidden");
+  try {
+    const w = await OBR.action.getWidth();
+    const h = await OBR.action.getHeight();
+    tutPrevSize = { w: w || 400, h: h || 600 };
+    let vw = 1200, vh = 820;
+    try { vw = await OBR.viewport.getWidth(); vh = await OBR.viewport.getHeight(); } catch (_) {}
+    await OBR.action.setWidth(Math.max(tutPrevSize.w, Math.min(1200, Math.round(vw * 0.92))));
+    await OBR.action.setHeight(Math.max(tutPrevSize.h, Math.min(900, Math.round(vh * 0.92))));
+  } catch (_) {}
+  setTimeout(() => { centerTutCard(); renderMenu(); }, 120); // let the resize settle
+}
+async function closeTutorial() {
   tutOverlay()?.classList.add("hidden");
   tutOverlay()?.classList.remove("peek");
   clearTutHighlight();
+  try {
+    if (tutPrevSize) { await OBR.action.setWidth(tutPrevSize.w); await OBR.action.setHeight(tutPrevSize.h); tutPrevSize = null; }
+  } catch (_) {}
 }
 function centerTutCard() {
   const card = $("tut-card"); if (!card) return;

@@ -450,12 +450,12 @@
       .gm-empty { color: var(--muted); font-family: var(--mono); font-size: 11px; padding: 20px; text-align: center; border: 1px dashed var(--line); }
 
       /* ---------- TUTORIAL ---------- */
-      #tutorial-overlay { position: fixed; inset: 0; z-index: 90; background: rgba(4,6,10,0.66); }
+      #tutorial-overlay { position: fixed; inset: 0; z-index: 99990; background: rgba(4,6,10,0.66); }
       #tutorial-overlay.hidden { display: none; }
       /* "peek": backdrop clears + clicks pass THROUGH to the panel; the card stays
          wherever the player dragged it, tethered to its target by the holo line */
       #tutorial-overlay.peek { background: transparent; pointer-events: none; }
-      #tut-card { pointer-events: auto; position: fixed; left: 50%; top: 12%; width: 320px; height: auto; max-height: 82vh;
+      #tut-card { pointer-events: auto; position: fixed; left: 50%; top: 12%; width: 320px; height: auto; max-height: 82vh; z-index: 99992;
         display: flex; flex-direction: column; background: linear-gradient(180deg, #141926, #0c0f16);
         border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,0.7); overflow: hidden; }
       #tut-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); background: rgba(47,107,189,0.14); cursor: grab; user-select: none; }
@@ -491,7 +491,7 @@
       .tut-uc code { color: var(--text); background: rgba(0,0,0,0.45); padding: 2px 6px; border-radius: 3px; font-size: 11px; word-break: break-all; }
       .tut-shot { width: 100%; border-radius: 8px; border: 1px solid var(--line); display: block; }
       /* holographic tether: a thin marching-ants line from the card to the target */
-      #tut-link { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; z-index: 93; pointer-events: none; overflow: visible; }
+      #tut-link { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; z-index: 99991; pointer-events: none; overflow: visible; }
       #tut-link.hidden { display: none; }
       #tut-link-line { stroke: var(--tech); stroke-width: 1.6; stroke-dasharray: 5 5; stroke-linecap: round;
         filter: drop-shadow(0 0 3px rgba(63,167,214,0.9)); animation: tut-march 0.6s linear infinite; }

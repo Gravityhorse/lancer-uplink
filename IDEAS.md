@@ -135,18 +135,21 @@ A categorical, in-app tutorial for new players. Proposed shape:
 
 ## Shipped in 2.8.12 ✓
 
-- ✓ **Right-click "Upload Pilot"** on any token — an embed with a file button that
-  reads your COMP/CON JSON and imports it (the file dialog opens from the embed's
-  own gesture; a bare `onClick` can't). Broadcasts the text to the panel over LOCAL
-- ✓ **"Move Lancer"** is now a top-level right-click item (not in the embed) so
-  clicking it CLOSES the native menu, forces the Boost field up and arms the Move
-  To tool via `tool.activateMoveTo()` — a whole turn is right-click → click-a-tile
+- ✓ **One "Lancer Uplink" right-click dropdown on any token** — everything lives
+  under it now: Move / Boost / Sensors, **Move Lancer**, **Bond Token**, and
+  **Choose COMP/CON JSON** (a file button in the embed — the dialog opens from the
+  embed's own gesture; a bare `onClick` can't). Bond/Upload broadcast to the panel
+  and reuse the exact bond + `importPilots()` code. Separate top-level items were
+  folded back in
 - ✓ **Close button on the multiplayer roll popover** (✕ top-right)
 - ✓ **Right-click menu de-duped** — dropped the redundant "Lancer Uplink" header
   inside the embed; off-center grid fix (centre-only snapping) from the same pass
 - ✓ **Tutorial** — a **Tutorial** button at the top of House Rules opens a
-  categorised, ELI5 walkthrough. It now starts on a **menu** (Full Tour or jump to
-  one segment), the card is **draggable (title bar) and resizable (corner grip)**,
+  categorised, ELI5 walkthrough. It renders on the **highest layer** and, while
+  open, GROWS the Owlbear action popover (via `OBR.action.setWidth/Height`) so the
+  card can be dragged well beyond the 400px panel — restored on close. It starts on
+  a **menu** (Full Tour or jump to one segment), the card is **draggable (title
+  bar) and resizable (corner grip)**,
   the "LU" badge is the real logo (with a GM step that guides you to click the
   header logo → Mission Control), and steps guide via a **holographic tether line**
   (marching-ants) drawn from the card to the target control — it follows the card
