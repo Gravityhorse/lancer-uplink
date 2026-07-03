@@ -12,7 +12,7 @@
 //
 // Lancer rules note: GRIT applies to attack rolls only, never to damage.
 
-import { OBR, CH_ROLL3D, CH_STATUS, META, buildShape, buildLabel, buildPath, Command, CH_RP, CH_RP_READY, CH_RP_CLOSED, RP_POPOVER, RP_POPOVER_URL, CM_ID, CM_URL, CH_CM, CH_CM_READY, CH_CM_DATA, CH_UPLOAD, UPLOAD_URL } from "./sdk.js";
+import { OBR, CH_ROLL3D, CH_STATUS, META, buildShape, buildLabel, buildPath, Command, CH_RP, CH_RP_READY, CH_RP_CLOSED, RP_POPOVER, RP_POPOVER_URL, CM_ID, CM_URL, CH_CM, CH_CM_READY, CH_CM_DATA, CH_UPLOAD, UPLOAD_URL, UPLOAD_MODAL } from "./sdk.js";
 import * as hex from "./hex.js";
 import * as tool from "./tool.js";
 import {
@@ -1039,8 +1039,29 @@ $("btn-unbond")?.addEventListener("click", async () => {
 // a separate "Move Here" entry that only shows on the Move To marker.
 // (The bonded-only menu is gone — everything is under the one dropdown now.)
 async function refreshContextMenu() { /* menu is static now — nothing to refresh */ }
+
+// Deselecting dismisses the right-click dropdown (context menus live on the
+// selection) — the same way Owlbear's own Copy entry closes it.
+async function closeContextMenu() {
+  try { await OBR.player.deselect(); } catch (_) {}
+}
+
 async function doMoveLancer() {
   if (!currentMech) { setStatus("Load a pilot first.", "status-err"); return; }
+  // no bond yet? bond the token that was just right-clicked, automatically —
+  // Move Lancer teleports the BONDED token, so grab it while it's selected
+  if (!bond?.id) {
+    try {
+      const sel = await OBR.player.getSelection();
+      if (sel && sel.length) {
+        const items = await OBR.scene.items.getItems([sel[0]]);
+        applyBond(sel[0], items[0]?.name || items[0]?.text?.plainText || "token");
+      }
+    } catch (_) {}
+    if (!bond?.id) { setStatus("Right-click YOUR token (or bond one first) to Move Lancer.", "status-err"); return; }
+  }
+  await closeContextMenu(); // dismiss the dropdown like a normal menu action
+
   // ensure the boost field is up (even if boost was already active), then arm the
   // Move To tool so any in-range tile is click-to-move
   if (!activeFields.boost) {
@@ -1051,8 +1072,45 @@ async function doMoveLancer() {
   } else {
     updateMoveContext();
   }
-  try { await tool.activateMoveTo(); } catch (e) { console.warn("[LANCER//UPLINK] Move To activate failed", e); }
+
+  // THE FIX for "only works if Move To was already selected": as the context-
+  // menu interaction unwinds, Owlbear restores whatever tool was active BEFORE
+  // the right-click — silently overwriting an immediate tool switch. So we
+  // switch after the menu has fully closed, and once more as a safety net.
+  const arm = async () => {
+    try { await tool.activateMoveTo(); }
+    catch (e) { console.warn("[LANCER//UPLINK] Move To activate failed", e); }
+  };
+  setTimeout(arm, 250);
+  setTimeout(arm, 900);
   setStatus("MOVE LANCER — boost range up. Click any tile in range to move.", "status-ok");
+}
+
+// Bond from the right-click menu: read the selection FIRST (deselecting wipes
+// it), then close the menu, then bond.
+async function cmBondAndClose() {
+  try {
+    const sel = await OBR.player.getSelection();
+    if (!sel || !sel.length) { setStatus("Right-click a token first, then Bond.", "status-err"); return; }
+    const items = await OBR.scene.items.getItems([sel[0]]);
+    const name = items[0]?.name || items[0]?.text?.plainText || "token";
+    await closeContextMenu();
+    applyBond(sel[0], name);
+    try { await recalibrate(); } catch (_) {}
+    setStatus(`Bonded to "${bond.name}" — grid fitted.`, "status-ok");
+  } catch (_) { setStatus("Could not read the selection.", "status-err"); }
+}
+
+// "Choose COMP/CON JSON" — opens a stable MODAL window with the file picker.
+// (A picker inside the context-menu embed dies with the menu; a modal doesn't.)
+async function cmOpenUpload() {
+  await closeContextMenu();
+  try {
+    await OBR.modal.open({ id: UPLOAD_MODAL, url: UPLOAD_URL, width: 340, height: 150 });
+  } catch (e) {
+    console.warn("[LANCER//UPLINK] upload modal failed", e);
+    setStatus("Couldn't open the upload window — use the PILOT tab's import instead.", "status-err");
+  }
 }
 async function cmMove() {
   if (activeFields.boost) await removeField("boost");
@@ -1078,8 +1136,9 @@ async function bondSelectedToken() {
 }
 async function handleCM(d) {
   if (!d || !d.action) return;
-  if (d.action === "bond") return bondSelectedToken();     // no pilot needed
-  if (d.action === "movelancer") return doMoveLancer();
+  if (d.action === "bond") return cmBondAndClose();        // no pilot needed; closes menu
+  if (d.action === "upload") return cmOpenUpload();        // no pilot needed; closes menu
+  if (d.action === "movelancer") return doMoveLancer();    // closes menu
   if (!currentMech) { setStatus("Load a pilot first.", "status-err"); return; }
   if (d.action === "move") await cmMove();
   else if (d.action === "boost") await cmBoost();
@@ -1219,8 +1278,8 @@ async function updateMoveContext() {
 function renderMobility(s) {
   const el = $("mobility");
   el.innerHTML = `
-    <button class="mob-btn green" data-mob="move" title="Cycle: move → move+boost → off">MOVE<small>${s.speed} HEX</small></button>
-    <button class="mob-btn blue" data-mob="sensors" title="Toggle sensor range">SENSORS<small>${s.sensors} HEX</small></button>`;
+    <button class="mob-btn green" data-mob="move" title="Cycle: move → move+boost → off" data-help-title="MOVE / BOOST" data-help="Cycles your movement field: green speed ring → speed + boost (double, with a boundary line) → off. Only you can see it, and it follows your bonded token.">MOVE<small>${s.speed} HEX</small></button>
+    <button class="mob-btn blue" data-mob="sensors" title="Toggle sensor range" data-help-title="SENSORS" data-help="Toggles your blue sensor range — tech attacks reach anything inside it. Only you can see it.">SENSORS<small>${s.sensors} HEX</small></button>`;
   el.querySelector('[data-mob="move"]').addEventListener("click", cycleMove);
   el.querySelector('[data-mob="sensors"]').addEventListener("click", toggleSensors);
 
@@ -1287,16 +1346,27 @@ function segBarRows(cur, max, color, perRow = 20) {
 function renderCC(s) {
   const el = $("view-cc");
   if (!el || !live) return;
+  const ROW_HELP = {
+    hp: "Your hull points. Hitting 0 automatically costs 1 Structure and refills the bar (overshield absorbs damage first).",
+    heat: "Reactor heat. Pushing past your Heat Capacity costs 1 Stress and clears the bar — stay out of the red.",
+    repairs: "Repair capacity — spend these during a rest to patch the mech back up.",
+    core: "Your CORE power charge. Hover the label for what your frame's core system actually does.",
+  };
   const row = (key, label, cur, max, color, help = false) => `
     <div class="ccrow" data-key="${key}">
       <span class="lbl${help ? " help" : ""}">${label}</span>
-      <button class="pm" data-cc="${key}" data-d="-1">−</button>
+      <button class="pm" data-cc="${key}" data-d="-1" data-help-title="${label} −" data-help="Lower ${label} by one. ${ROW_HELP[key] || ""}">−</button>
       ${segBar(cur, max, color)}
-      <button class="pm" data-cc="${key}" data-d="1">+</button>
+      <button class="pm" data-cc="${key}" data-d="1" data-help-title="${label} +" data-help="Raise ${label} by one. ${ROW_HELP[key] || ""}">+</button>
       <span class="val">${cur}/${max}</span>
     </div>`;
+  const PP_HELP = {
+    structure: "Structure is your mech's skeleton (usually 4). Lose it all and the mech is destroyed.",
+    stress: "Reactor stress (usually 4). Lose it all and the reactor melts down.",
+    overshield: "Temporary shield HP that absorbs damage before your real HP.",
+  };
   const pp = (key) =>
-    `<button class="pp" data-pp="${key}" data-d="-1">−</button><button class="pp" data-pp="${key}" data-d="1">+</button>`;
+    `<button class="pp" data-pp="${key}" data-d="-1" data-help-title="${key.toUpperCase()} −" data-help="${PP_HELP[key] || ""}">−</button><button class="pp" data-pp="${key}" data-d="1" data-help-title="${key.toUpperCase()} +" data-help="${PP_HELP[key] || ""}">+</button>`;
   el.innerHTML =
     row("hp", "HP", live.hp, s.hpMax, "var(--hpblue)") +
     row("heat", "HEAT", live.heat, s.heatMax, "var(--heatred)") +
@@ -1528,7 +1598,7 @@ function weaponCard(w, mountLabel) {
   if (w.loading) tags.push("LOADING");
   const spec = weaponTemplateSpec(w);
   const tmplBtn = spec
-    ? `<button class="btn small ghost icon-btn" data-act="tmpl" title="${spec.field ? `Toggle ${spec.name} field around your token` : `Arm ${spec.name} template`}">◈</button>`
+    ? `<button class="btn small ghost icon-btn" data-act="tmpl" title="${spec.field ? `Toggle ${spec.name} field around your token` : `Arm ${spec.name} template`}" data-help-title="◈ RANGE / TEMPLATE" data-help="${spec.field ? "Shows this weapon's reach as a red field around your token — click again to hide it." : "Arms this weapon's blast/cone/line template at the right size — then click the map to place it."}">◈</button>`
     : "";
   const act = weaponActionInfo(w, mountLabel);
   // ATK and Target Lock are one button now: it always runs the lock flow
@@ -1538,7 +1608,7 @@ function weaponCard(w, mountLabel) {
       <span class="wname" data-act="info" title="${act.title} — hover for weapon details">${act.icon}${w.name}</span>
       <span class="wbtns">
         ${tmplBtn}
-        <button class="btn small atk-lock" data-act="lock" title="ATK / Target Lock — roll accuracy, then FIRE chains damage">ATK<span class="hexlogo">⬢</span></button>
+        <button class="btn small atk-lock" data-act="lock" title="ATK / Target Lock — roll accuracy, then FIRE chains damage" data-help-title="ATK ⬢" data-help="Rolls this weapon's attack: d20 + grit, ready in the tray. After the result, a red FIRE button appears — hit it and the weapon's full damage rolls automatically (doubled dice on a 20+ crit).">ATK<span class="hexlogo">⬢</span></button>
       </span>
     </div>
     <div class="wmod${w.mod ? " has-mod" : ""}" data-act="mod">${w.mod ? `◈ ${w.mod.name}${w.mod.sp != null ? ` · ${w.mod.sp} SP` : ""}` : "NO WEAPON MOD"}</div>
@@ -1595,8 +1665,8 @@ function renderTechCard(s) {
       <div class="top">
         <span class="wname" title="Quick action (Quick Tech)">${ICON_QUICK}TECH ATTACK</span>
         <span class="wbtns">
-          <button class="btn small ghost icon-btn" data-act="trange" title="Toggle sensor range field (tech attacks reach anything in Sensors)">◈</button>
-          <button class="btn small tech-lock" data-act="tlock" title="TECH ATK / Target Lock — d20 ${sign} vs E-DEF, then FIRE">TECH ATK<span class="hexlogo">⬢</span></button>
+          <button class="btn small ghost icon-btn" data-act="trange" title="Toggle sensor range field (tech attacks reach anything in Sensors)" data-help-title="◈ SENSOR RANGE" data-help="Shows your sensor range as a blue field — everything inside it is a valid tech-attack target. Click again to hide.">◈</button>
+          <button class="btn small tech-lock" data-act="tlock" title="TECH ATK / Target Lock — d20 ${sign} vs E-DEF, then FIRE" data-help-title="TECH ATK ⬢" data-help="Rolls a tech attack: d20 ${sign} versus the target's E-Defense. Invades, system attacks and hacks all resolve through this.">TECH ATK<span class="hexlogo">⬢</span></button>
         </span>
       </div>
       <div class="meta">d20 ${sign} vs E-DEF — Sensors ${s.sensors}</div>
@@ -3082,7 +3152,11 @@ function centerTutCard() {
   card.style.left = `${Math.max(6, Math.round((window.innerWidth - w) / 2))}px`;
   card.style.top = `${Math.round(window.innerHeight * 0.1)}px`;
 }
-function clearTutHighlight() { if (tutHl) { tutHl.classList.remove("tut-highlight"); tutHl = null; } stopTether(); }
+function clearTutHighlight() {
+  if (tutHl) { tutHl.classList.remove("tut-highlight"); tutHl = null; }
+  tutGuide = null;
+  stopTether();
+}
 
 function renderMenu() {
   tutMode = null;
@@ -3155,30 +3229,75 @@ function tryLoadShot(uc) {
   img.onload = () => { const box = $("tut-uc-box"); if (box) box.outerHTML = `<img class="tut-shot" src="${uc.path}" alt="${uc.name}">`; };
   img.src = `${uc.path}?t=${Date.now()}`;
 }
+// ---- cross-tab guidance -------------------------------------------------------
+// The tether is TWO-STAGE. If the target control lives on a pane that isn't
+// open, we point at (and highlight) the matching TAB BUTTON first — the player
+// clicks it, and the tether hops to the real control on the next frame. This
+// also self-heals live: wander off to another tab mid-step and the arrow walks
+// you back via the tab, instead of aiming at a hidden element's (0,0) rect and
+// shooting off-screen.
+let tutGuide = null; // { sel, tab } while a guide step is active
+
+function paneTabOf(el) {
+  const pane = el?.closest?.(".tabpane");
+  return pane && pane.id?.startsWith("tab-") ? pane.id.slice(4) : null;
+}
+
+// → { el, phase: "tab" | "target" } | null
+function resolveGuideTarget() {
+  if (!tutGuide) return null;
+  const el = tutGuide.sel ? document.querySelector(tutGuide.sel) : null;
+  if (!el) return null;
+  const tab = tutGuide.tab || paneTabOf(el);
+  if (tab) {
+    const pane = document.getElementById(`tab-${tab}`);
+    if (pane && !pane.classList.contains("active")) {
+      const tabBtn = document.querySelector(`nav.tabs button[data-tab="${tab}"]`);
+      if (tabBtn) return { el: tabBtn, phase: "tab" };
+    }
+  }
+  return { el, phase: "target" };
+}
+
+function applyGuideTarget(t) {
+  if (!t || !t.el) {
+    if (tutHl) { tutHl.classList.remove("tut-highlight"); tutHl = null; }
+    return;
+  }
+  if (tutHl === t.el) return;
+  if (tutHl) tutHl.classList.remove("tut-highlight");
+  tutHl = t.el;
+  tutHl.classList.add("tut-highlight");
+  // scroll the real control into view once we're on its pane (tab buttons are
+  // in the sticky header — no scrolling needed for those)
+  if (t.phase === "target") {
+    try { tutHl.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (_) {}
+  }
+}
+
 function guideTo(guide) {
-  if (guide.tab) document.querySelector(`nav.tabs button[data-tab="${guide.tab}"]`)?.click();
-  setTimeout(() => {
-    const el = guide.sel ? document.querySelector(guide.sel) : null;
-    if (!el) return;
-    try { el.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (_) {}
-    el.classList.add("tut-highlight");
-    tutHl = el;
-    setTimeout(startTether, 350);
-  }, guide.tab ? 280 : 20);
+  tutGuide = guide;
+  applyGuideTarget(resolveGuideTarget());
+  setTimeout(startTether, 250);
 }
 
 // ---- holographic tether: a marching-ants line from the card to the target ----
 let tetherRaf = 0;
 function startTether() {
   cancelAnimationFrame(tetherRaf);
-  const loop = () => { if (!tutHl) { stopTether(); return; } updateTether(); tetherRaf = requestAnimationFrame(loop); };
+  const loop = () => { if (!tutGuide) { stopTether(); return; } updateTether(); tetherRaf = requestAnimationFrame(loop); };
   tetherRaf = requestAnimationFrame(loop);
 }
 function stopTether() { cancelAnimationFrame(tetherRaf); $("tut-link")?.classList.add("hidden"); }
 function updateTether() {
   const link = $("tut-link"), line = $("tut-link-line"), dot = $("tut-link-dot"), card = $("tut-card");
-  if (!tutHl || !link || !line || !card) return;
+  if (!link || !line || !card) return;
+  // re-resolve EVERY frame: tab switches (by the player or the step) retarget
+  // the tether between the tab button and the real control automatically
+  applyGuideTarget(resolveGuideTarget());
+  if (!tutHl) { link.classList.add("hidden"); return; }
   const t = tutHl.getBoundingClientRect();
+  if (!t.width && !t.height) { link.classList.add("hidden"); return; } // hidden element — never aim off-screen
   const c = card.getBoundingClientRect();
   const tx = t.left + t.width / 2, ty = t.top + t.height / 2;
   // start = the point on the card's border nearest the target, so the line
@@ -3232,32 +3351,100 @@ $("tut-prev")?.addEventListener("click", tutPrev);
 // SEPARATE from the always-on chip tooltips: this layer only fires when "Enable
 // Tutorial Popup Dialogue" is on. It reuses the existing lavender-tooltip code.
 const tutDialogueOn = () => !!$("tut-dialogue-toggle")?.checked;
+// Every entry stamps `data-help` (+ title) on the matching element(s). The
+// listener below is DELEGATED, so anything rendered later — weapon buttons,
+// HP steppers, NPC cards — joins the help layer just by carrying data-help.
 const HELP = {
+  // -------- header & tabs --------
+  "#hdr-icon": ["MISSION CONTROL", "Click the logo to flip between LANCER//UPLINK (player view) and MISSION//CONTROL (GM view). It spins right back when you click again."],
   'nav.tabs button[data-tab="pilot"]': ["PILOT", "Your mech sheet — import a COMP/CON pilot and see stats, weapons, systems and talents."],
   'nav.tabs button[data-tab="dice"]': ["DICE", "The 3D dice tray. Queue dice, hit ROLL, read the total. All attacks roll here."],
   'nav.tabs button[data-tab="map"]': ["MAP", "Templates, private range fields, token bond, and grid calibration."],
-  "#rolldice": ["ROLL", "Throws every queued die and pops the total."],
+  // -------- pilot tab --------
+  ".filebtn": ["IMPORT PILOT", "Pick your COMP/CON export here (Pilot Roster → Export → Download pilot as JSON). Uplink builds your whole sheet from it."],
+  "#mechselect": ["ACTIVE MECH", "If your pilot has more than one mech (or fights on foot), switch which one the sheet shows here."],
+  "#forgetpilot": ["FORGET PILOT", "Stops auto-loading your saved pilot next session. Your JSON file is untouched — re-import any time."],
+  "#btn-view-cc": ["COMP/CON VIEW", "The pretty view: slanted HP and Heat bars, pips and steppers, just like COMP/CON."],
+  "#btn-view-grid": ["STAT GRID VIEW", "The plain view: every stat as a simple number box. Easier to read at a glance."],
+  // -------- dice tab --------
+  '.die-btn[data-die="d4"]': ["d4", "Queues a four-sided die. Tap more than once for more dice."],
+  '.die-btn[data-die="d6"]': ["d6", "Queues a six-sided die — Lancer's workhorse damage die."],
+  '.die-btn[data-die="d8"]': ["d8", "Queues an eight-sided die."],
+  '.die-btn[data-die="d10"]': ["d10", "Queues a ten-sided die."],
+  '.die-btn[data-die="d12"]': ["d12", "Queues a twelve-sided die."],
+  '.die-btn[data-die="d20"]': ["d20", "Queues the d20 — every attack and check starts with one of these."],
+  "#addadv": ["ACCURACY", "Adds a +1 Accuracy die (blue crystal). Accuracy and Difficulty cancel 1-for-1; only the single highest leftover die applies."],
+  "#adddis": ["DIFFICULTY", "Adds a +1 Difficulty die (purple crystal, a penalty). Cancels Accuracy 1-for-1."],
+  "#addovercharge": ["OVERCHARGE", "Push the reactor for an extra quick action: costs escalating Heat (1 → 1d3 → 1d6 → 1d6+4). The first is instant; the rest prime a molten die for ROLL."],
+  "#rolldice": ["ROLL", "Throws every queued die and pops the total in the corner window."],
   "#cleardice": ["CLEAR", "Empties the tray and clears the last result."],
-  "#addadv": ["ACCURACY", "Adds a +1 Accuracy die. Accuracy and Difficulty cancel 1-for-1; only the single highest applies."],
-  "#adddis": ["DIFFICULTY", "Adds a +1 Difficulty die (a penalty). Cancels Accuracy 1-for-1."],
+  "#firebtn": ["FIRE", "Your accuracy roll is in — this rolls the locked weapon's full damage (crit-doubled if you hit 20+)."],
+  "#overclockbtn": ["OVERCLOCK", "Combat Drill house rule: like FIRE, but Overkill 1s explode into extra dice instead of rerolling."],
+  "#heatapply": ["APPLY HEAT", "Adds the Overkill heat from that roll straight onto your Heat bar — overheats automatically if it bursts the cap."],
+  "#resultclear": ["CLEAR RESULT", "Dismisses the result window and empties the tray for the next roll."],
+  ".stepper": ["FLAT MOD", "A plain number added to the roll's total — grit, tech attack, cover, whatever the fiction demands."],
+  "#ok-wrap": ["OVERKILL", "Weapon tag: any damage die showing 1 rerolls (and you take 1 Heat per reroll). Auto-set when the weapon has it."],
+  "#crit-wrap": ["CRIT", "Crit damage: every damage die is rolled twice and each pair keeps the higher. Auto-set by the FIRE flow on a 20+."],
+  "#clear-oc": ["CLEAR OC", "Resets the Overcharge ladder to the start — do this after a full repair/rest."],
+  "#oc-meter": ["OC LEVEL", "How far up the Overcharge ladder you are (0–4). Higher = hotter."],
+  "#snd-toggle": ["DICE SOUNDS", "Toggles the stone clack of the dice. Subtle, but satisfying."],
+  "#scheme": ["DICE FACTION", "Reskins your dice in a manufacturer's colours. Teammates see YOUR colours when your rolls replay for them."],
+  "#clearlog": ["CLEAR LOG", "Wipes the combat log on your screen only."],
+  // -------- map tab --------
+  "#map-move": ["MOVE / BOOST", "Cycles your movement field: green speed ring → speed + boost (double, with a boundary) → off. Only you see it."],
+  "#map-sensors": ["SENSORS", "Toggles your blue sensor range. Tech attacks reach anything inside it. Only you see it."],
   "#btn-bond": ["BOND TOKEN", "Links the selected token to your mech so ranges follow it — and fits the grid to the scene."],
+  "#btn-unbond": ["CLEAR BOND", "Forgets the bonded token. Range fields go back to click-to-place."],
   "#vis-toggle": ["TEMPLATE VISIBILITY", "Toggle whether weapon templates you place are seen by ALL players or just you."],
+  "#btn-undo-tmpl": ["UNDO LAST", "Removes the most recent template you placed (and the one before that, and so on)."],
+  "#clearmine": ["CLEAR MY TEMPLATES", "Deletes every template YOU have placed. Other players' templates are untouched."],
+  "#clearranges": ["CLEAR RANGE FIELDS", "Removes your private move/sensor/weapon range fields from the map."],
   "#tplcolor-toggle": ["TEMPLATE COLOR", "Opens the colour picker used by Blast, Cone, Line, Paint and Pen."],
   "#grid-mode": ["GRID TYPE", "AUTO reads the room's grid. Override to pointy/flat hex or square if a scene is unusual."],
+  "#cell-size": ["TILE SIZE", "Manually match Uplink's tile size to the scene's grid if the auto-probe misses."],
+  "#nudge-mode": ["SLIDER MODE", "Swaps the offset arrows for smooth X/Y sliders."],
+  "#nx-minus": ["OFFSET LEFT", "Slides the whole overlay lattice ⅛-tile left. Watch your fields move live."],
+  "#nx-plus": ["OFFSET RIGHT", "Slides the whole overlay lattice ⅛-tile right."],
+  "#ny-minus": ["OFFSET UP", "Slides the whole overlay lattice ⅛-tile up."],
+  "#ny-plus": ["OFFSET DOWN", "Slides the whole overlay lattice ⅛-tile down."],
+  "#n-reset": ["RESET OFFSET", "Clears any manual offset — back to the probed grid."],
+  "#btn-dragoffset": ["CLICK-DRAG OFFSET", "With a range field up: toggle ON, then grab the field on the map and drag everything into alignment at once. TIP: turn off Owlbear's grid snapping for buttery dragging."],
+  "#btn-fit": ["FIT TO SCENE", "Re-probes the room's grid and matches tile size, orientation and origin to it. Try this first if templates look misaligned."],
+  "#tutorial-btn": ["TUTORIAL", "Opens the guided walkthrough — full tour or jump to one topic. The arrow points at the real buttons."],
+  "#font-minus": ["SMALLER TEXT", "Shrinks the whole panel a notch."],
+  "#font-plus": ["BIGGER TEXT", "Grows the whole panel a notch (up to 140%)."],
+  "#font-reset": ["DEFAULT SIZE", "Back to 100%."],
+  // -------- GM / Mission Control --------
+  "#gmtab-squad": ["SQUAD TELEMETRY", "Live HP/Heat for every player with their panel open. Click a lancer to fly the camera to their token."],
+  "#gmtab-field": ["FIELD TELEMETRY", "Your private NPC roster — players can never see it. Add enemies by hand or import JSON."],
+  "#npc-add": ["ADD NPC", "Opens a quick form: name, HP, Heat, defenses, notes. Everything a fight needs."],
+  "#npc-clear": ["CLEAR ALL NPCS", "Deletes the whole roster (asks first)."],
+  "#nf-save-btn": ["SAVE NPC", "Stores this NPC on your machine and drops its card into the roster."],
+  "#nf-cancel": ["CANCEL", "Closes the form without saving."],
 };
 (function setupHelpTooltips() {
-  const wire = (el, title, help) => {
-    if (!el || !help) return;
-    el.addEventListener("mouseenter", (e) => { if (tutDialogueOn()) showTip(title, help, e); });
-    el.addEventListener("mousemove", (e) => { if (tutDialogueOn() && tipEl.style.display === "block") moveTooltip(e); });
-    el.addEventListener("mouseleave", () => hideTooltip());
-  };
-  // 1) explicit HELP map (stable selectors)
-  for (const [sel, [title, help]] of Object.entries(HELP)) wire(document.querySelector(sel), title, help);
-  // 2) any element carrying a data-help attribute (e.g. the House Rules toggles)
-  document.querySelectorAll("[data-help]").forEach((el) => {
-    const title = (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 42) || "Info";
-    wire(el, title, el.getAttribute("data-help"));
+  // 1) stamp the static map onto the DOM as data attributes
+  for (const [sel, [title, help]] of Object.entries(HELP)) {
+    document.querySelectorAll(sel).forEach((el) => {
+      if (!el.hasAttribute("data-help")) el.setAttribute("data-help", help);
+      if (!el.hasAttribute("data-help-title")) el.setAttribute("data-help-title", title);
+    });
+  }
+  // 2) ONE delegated listener covers every [data-help] element — including ones
+  //    rendered long after boot (weapon buttons, steppers, NPC cards…)
+  let helpEl = null;
+  document.addEventListener("mouseover", (e) => {
+    if (!tutDialogueOn()) { helpEl = null; return; }
+    const el = e.target.closest?.("[data-help]");
+    if (el === helpEl) return;
+    helpEl = el || null;
+    if (!el) { hideTooltip(); return; }
+    const title = el.getAttribute("data-help-title") ||
+      (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 42) || "Info";
+    showTip(title, el.getAttribute("data-help"), e);
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (helpEl && tutDialogueOn() && tipEl.style.display === "block") moveTooltip(e);
   });
 })();
 
@@ -3375,7 +3562,7 @@ async function start() {
     OBR.broadcast.onMessage(CH_RP_CLOSED, () => { rpOpen = false; rpBuffer = []; });
     // right-click context-menu embed: Move / Boost / Sensors commands
     OBR.broadcast.onMessage(CH_CM, (ev) => handleCM(ev.data));
-    // right-click "Upload Pilot" embed → import the JSON it read
+    // "Choose COMP/CON JSON" modal → import the JSON it read, then close it
     OBR.broadcast.onMessage(CH_UPLOAD, async (ev) => {
       const d = ev.data || {};
       if (!d.text) return;
@@ -3383,6 +3570,7 @@ async function start() {
         const json = JSON.parse(d.text);
         await importPilots(listPilots(json), json);
         setStatus(`Imported ${d.name || "pilot"}.`, "status-ok");
+        try { await OBR.modal.close(UPLOAD_MODAL); } catch (_) {}
       } catch (err) { setStatus(`Import failed: ${err.message || err}`, "status-err"); }
     });
   } catch (e) {

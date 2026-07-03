@@ -664,8 +664,8 @@
           </div>
           <label class="chk" id="ok-wrap" title="Damage dice showing 1 explode into bonus dice; +1 Heat per 1"><input id="overkill-toggle" type="checkbox" /> OVERKILL</label>
           <label class="chk" id="crit-wrap" title="Crit damage: every damage die is rolled twice, keep the highest of each pair"><input id="crit-toggle" type="checkbox" /> CRIT</label>
-          <label class="chk" title="Keep only the highest normal die"><input id="keephigh" type="checkbox" /> KEEP HIGH</label>
-          <label class="chk" title="Roll stays on your screen only"><input id="hideroll" type="checkbox" /> HIDDEN</label>
+          <label class="chk" title="Keep only the highest normal die" data-help-title="KEEP HIGH" data-help="Instead of adding your dice together, only the single highest one counts. Handy for house rules — not standard Lancer."><input id="keephigh" type="checkbox" /> KEEP HIGH</label>
+          <label class="chk" title="Roll stays on your screen only" data-help-title="HIDDEN" data-help="Your next rolls stay on YOUR screen only — nothing is broadcast to the table. For secret GM rolls and shy dice."><input id="hideroll" type="checkbox" /> HIDDEN</label>
           <button id="clear-oc" class="occlr" title="Reset the Overcharge counter to base (after a full rest)">CLEAR OC</button>
           <span id="oc-meter" class="segbar ocmeter" title="Overcharge level (0–4)"></span>
           <button id="snd-toggle" class="sndbtn" title="Dice sounds on/off">🔊</button>
@@ -766,8 +766,8 @@
             <label class="chk" style="margin-top:12px" data-help="Turns on the lavender help pop-ups across the whole panel — hover almost anything and it tells you what it does. Great for new players; leave it off once you know the ropes."><input id="tut-dialogue-toggle" type="checkbox" /> ENABLE TUTORIAL POPUP DIALOGUE</label>
             <label class="chk" style="margin-top:12px" data-help="When HP hits 0 or Heat exceeds Heat Capacity, automatically roll the structure / overheating table and post the results to the Combat Log."><input id="macro-toggle" type="checkbox" /> AUTO STRUCTURE / OVERHEAT TABLE ROLLS</label>
             <label class="chk" style="margin-top:12px" data-help="Draws small blue HP and orange Heat bars above your bonded token (and your squad's), so the whole table can read health at a glance."><input id="tokenbars-toggle" type="checkbox" /> LIVE HP / HEAT BARS OVER BONDED TOKENS</label>
-            <label class="chk" style="margin-top:12px"><input id="overcharge-toggle" type="checkbox" /> OVERCHARGE DICE</label>
-            <label class="chk" style="margin-top:12px"><input id="remoteroll-toggle" type="checkbox" /> HIDE OTHER PLAYERS' DICE ROLLS</label>
+            <label class="chk" style="margin-top:12px" data-help-title="OVERCHARGE DICE" data-help="Adds the orange OC die to the dice column and a 0–4 level meter. Overcharge grants an extra quick action at escalating Heat cost: 1 → 1d3 → 1d6 → 1d6+4. CLEAR OC resets it after a full rest."><input id="overcharge-toggle" type="checkbox" /> OVERCHARGE DICE</label>
+            <label class="chk" style="margin-top:12px" data-help-title="HIDE OTHER ROLLS" data-help="Stops teammates' dice from replaying in the little on-screen roll window. Their results still land in your Combat Log."><input id="remoteroll-toggle" type="checkbox" /> HIDE OTHER PLAYERS' DICE ROLLS</label>
             <label style="margin-top:12px">UI text size <span id="font-val" style="color:var(--text);font-family:var(--mono)">100%</span></label>
             <div class="row">
               <button id="font-minus" class="btn ghost small" title="Smaller text">A−</button>
@@ -791,7 +791,7 @@
         <div id="field" class="hidden">
           <div class="row" style="margin-bottom:8px">
             <button id="npc-add" class="btn blue small">+ ADD NPC</button>
-            <label class="btn ghost small" style="text-align:center">IMPORT JSON<input id="npc-import" type="file" accept=".json,application/json" hidden /></label>
+            <label class="btn ghost small" style="text-align:center" data-help-title="IMPORT JSON" data-help="Builds NPCs from a file: a COMP/CON pilot export gets fully resolved (perfect for rival lancers), or feed it generic NPC JSON with hp/evasion/edef fields.">IMPORT JSON<input id="npc-import" type="file" accept=".json,application/json" hidden /></label>
             <button id="npc-clear" class="btn ghost small">CLEAR ALL</button>
           </div>
 

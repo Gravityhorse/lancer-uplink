@@ -29,3 +29,4 @@ export const CH_CM_READY = `${ID}/cm-ready`;  // embed → panel: "loaded, send 
 export const CH_CM_DATA = `${ID}/cm-data`;    // panel → embed: { name, weapons, active }
 export const CH_UPLOAD = `${ID}/upload`;      // upload embed → panel: { text, name }
 export const UPLOAD_URL = "/lancer-uplink/upload-pilot.html";
+export const UPLOAD_MODAL = `${ID}/upload-modal`; // OBR.modal id for the picker window
